@@ -1,0 +1,50 @@
+// BlowUI demo – interactive. Mouse + typing need X11 (XWayland is fine).
+fn main() {
+    Blow.Window(760, 470, "BlowUI demo")
+    let name: int = System.Memory.Alloc(256)
+    let clicks: int = 0
+    let notify: int = 1
+    let dark: int = 1
+    let vol: int = 62
+    let theme: int = 0
+    let running: int = 1
+    while running == 1 {
+        let closed: int = Blow.Poll()
+        if closed == -1 { running = 0 }
+        Blow.Begin(0)
+        Blow.Label(32, 24, "BlowUI", 4)
+        Blow.Muted(236, 40, "modern, rounded, pure-C UI for Purplecode", 1)
+        Blow.Panel(24, 100, 350, 340, 18)
+        Blow.Label(48, 122, "Controls", 2)
+        Blow.Divider(48, 152, 302)
+        let b1: int = Blow.Button(48, 176, 150, 44, "Click me")
+        if b1 == 1 { clicks = clicks + 1 }
+        Blow.Muted(214, 190, "clicks", 1)
+        Blow.LabelInt(214, 204, clicks, 2)
+        notify = Blow.Toggle(48, 248, notify)
+        Blow.Label(106, 254, "Notifications", 1)
+        dark = Blow.Checkbox(48, 292, dark, "Rounded corners")
+        Blow.Label(48, 336, "Volume", 1)
+        Blow.LabelInt(310, 336, vol, 1)
+        vol = Blow.Slider(1, 48, 372, 302, vol, 100)
+        Blow.Progress(48, 400, 302, 10, vol, 100)
+        Blow.Panel(394, 100, 342, 340, 18)
+        Blow.Label(418, 122, "Network and files", 2)
+        Blow.Divider(418, 152, 294)
+        let sent: int = Blow.TextBox(2, 418, 176, 294, name)
+        Blow.Badge(418, 238, "TCP", 0x34D399)
+        Blow.Badge(480, 238, "UDP", 0x60A5FA)
+        Blow.Badge(542, 238, "HTTP", 0xF59E0B)
+        Blow.Badge(612, 238, "Files", 0xF87171)
+        Blow.Muted(418, 282, "Net.Connect  Net.Listen  Net.HttpGet", 1)
+        Blow.Muted(418, 298, "Net.UdpSend  Net.HttpServe  File.Read", 1)
+        let bt: int = Blow.Button(418, 340, 140, 44, "Theme")
+        if bt == 1 { theme = theme + 1 }
+        if theme == 3 { theme = 0 }
+        if bt == 1 { Blow.Theme(theme) }
+        let bq: int = Blow.Button(572, 340, 140, 44, "Quit")
+        if bq == 1 { running = 0 }
+        Blow.End()
+    }
+    return 0
+}

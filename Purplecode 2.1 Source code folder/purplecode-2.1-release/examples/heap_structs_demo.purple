@@ -1,0 +1,48 @@
+// Purplecode 1.7 – Heap structs via Struct.New
+// Demonstrates allocating structs on the heap, field access through
+// the resulting pointer, and freeing them.
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+struct Entity {
+    id: int;
+    pos: Point;
+    health: int;
+    name: string;
+}
+
+fn main() {
+    Data.ShellPrint("=== Heap Structs (Struct.New) ===");
+
+    // Allocate a Point on the heap (zero-initialised)
+    let p = Struct.New(Point);
+    p.x = 100;
+    p.y = 200;
+
+    Data.ShellPrint("Heap Point.x / Point.y:");
+    Data.ShellPrint.Int(p.x);
+    Data.ShellPrint.Int(p.y);
+
+    // Nested struct on the heap
+    let hero = Struct.New(Entity);
+    hero.id = 7;
+    hero.pos.x = 42;
+    hero.pos.y = 99;
+    hero.health = 80;
+    hero.name = "HeapHero";
+
+    Data.ShellPrint("Hero id / health / pos.x:");
+    Data.ShellPrint.Int(hero.id);
+    Data.ShellPrint.Int(hero.health);
+    Data.ShellPrint.Int(hero.pos.x);
+
+    // Free the heap objects
+    Struct.Free(p);
+    Struct.Free(hero);
+
+    Data.ShellPrint("Heap structs work. Hell yeah!");
+    return 0;
+}

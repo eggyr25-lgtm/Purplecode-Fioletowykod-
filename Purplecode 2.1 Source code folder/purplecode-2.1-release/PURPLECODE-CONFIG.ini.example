@@ -1,0 +1,5 @@
+# Purplecode runtime policy. Copy to ~/.config/purplecode/config.ini
+# SafeCodeOnly=true blocks Program.ELF64.Run and native .so Controlangs.
+# VirtualMode=true runs ELF programs through bubblewrap isolation; it requires bwrap.
+SafeCodeOnly = false
+VirtualMode = false

@@ -1,0 +1,31 @@
+// Purplecode Milestone 1 1.4 — UEFI GOP framebuffer demonstration.
+// Color format: 0xRRGGBB. Requires firmware exposing EFI_GRAPHICS_OUTPUT_PROTOCOL.
+fn main() {
+    Screen.Clear()
+    Screen.Write("Purplecode Milestone 1 1.4 - GOP test\n")
+    let width: int = GUI.Width()
+    let height: int = GUI.Height()
+    if width == 0 || height == 0 {
+        Screen.Write("ERROR: GOP framebuffer unavailable.\n")
+        System.Panic("GOP unavailable")
+    }
+    GUI.FillRect(0, 0, width, height, 0x151020)
+    GUI.FillRect(24, 24, width - 48, 64, 0x523F8B)
+    GUI.FillRect(36, 36, width / 3, 12, 0xFFFFFF)
+    GUI.FillRect(36, 56, width / 2, 8, 0xB9A8F4)
+    GUI.FillRect(24, 112, width / 4, height / 5, 0xE85D75)
+    GUI.FillRect(width / 3, 112, width / 4, height / 5, 0x37B7A5)
+    GUI.FillRect((width * 2) / 3, 112, width / 4, height / 5, 0xE7B84B)
+    GUI.Pixel(8, 8, 0xFFFFFF)
+    Screen.Write("GOP drawing complete. Press a key to return status.\n")
+    let key: int = Input.ReadKey()
+    if key > 0 {
+        Screen.Write("Input event received.\n")
+    } else {
+        Screen.Write("No key event available (non-blocking read).\n")
+    }
+    while true {
+        CPU.Halt()
+    }
+    return 0
+}

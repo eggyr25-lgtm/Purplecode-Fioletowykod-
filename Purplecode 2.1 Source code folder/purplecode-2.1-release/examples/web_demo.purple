@@ -1,0 +1,13 @@
+#uselib "kustomlibrary.pl"
+fn main() {
+    Data.ShellPrint("Purplecode web/runtime integration demo")
+    let js_status: int = Web.JS.Run("examples/cache/demo.js")
+    Data.ShellPrint.Int(js_status)
+    let css_size: int = Web.CSS.Load("examples/cache/demo.css")
+    Data.ShellPrint.Int(css_size)
+    let image_size: int = Image.Load("examples/cache/demo.ppm")
+    Data.ShellPrint.Int(image_size)
+    let media_size: int = USB.Read("examples/cache/demo.js")
+    Data.ShellPrint.Int(media_size)
+    return 0
+}

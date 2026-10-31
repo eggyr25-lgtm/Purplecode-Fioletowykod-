@@ -1,0 +1,11 @@
+// Memory + FS example
+fn main() {
+    Data.ShellPrint("Writing string via FS.Data.Write")
+    FS.Data.Write "Kebab from Purplecode Milestone 1 1.6" > "/tmp/purple_kebab.txt"
+
+    Data.ShellPrint("Hex address demo")
+    Data.ShellPrint($100H)
+    Data.ShellPrint($DEADBEEFH)
+
+    return 0
+}

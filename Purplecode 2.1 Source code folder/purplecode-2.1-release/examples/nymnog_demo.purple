@@ -1,0 +1,13 @@
+// NYMNOG = Name.Yeah.MoreName.Oh.God: dotted APIs stay first-class.
+fn main() {
+    Data.ShellPrint("Purplecode NYMNOG API demo")
+    Data.ShellPrint("Current process ID follows:")
+    Data.ShellPrint(System.Process.ID())
+    Data.ShellPrint("Unix timestamp follows:")
+    Data.ShellPrint(System.Time.Unix())
+    Data.ShellPrint("Loading JS bytes from cache (not executing JavaScript):")
+    Web.JS.Load("examples/cache/demo.js")
+    Data.ShellPrint("Kernel syscall 39 = getpid; result follows:")
+    Data.ShellPrint(Kernel.Call(39, 0, 0, 0))
+    return 0
+}

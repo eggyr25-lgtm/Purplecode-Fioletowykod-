@@ -1,0 +1,44 @@
+// Purplecode Milestone 1.7 — Structs demo
+// Demonstrates user-defined aggregate types for larger programs.
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+struct Entity {
+    id: int;
+    pos: Point;
+    health: int;
+    name: string;
+}
+
+fn main() {
+    Data.ShellPrint("=== Purplecode 1.7 Structs Demo ===");
+
+    // Simple struct on the stack
+    let p: Point;
+    p.x = 10;
+    p.y = 20;
+
+    Data.ShellPrint("Point.x =");
+    Data.ShellPrint.Int(p.x);
+    Data.ShellPrint("Point.y =");
+    Data.ShellPrint.Int(p.y);
+
+    // Nested struct
+    let hero: Entity;
+    hero.id = 1;
+    hero.pos.x = 42;
+    hero.pos.y = 99;
+    hero.health = 100;
+    hero.name = "Hero";
+
+    Data.ShellPrint("Hero id / health / pos.x:");
+    Data.ShellPrint.Int(hero.id);
+    Data.ShellPrint.Int(hero.health);
+    Data.ShellPrint.Int(hero.pos.x);
+
+    Data.ShellPrint("Structs are working. Hell yeah!");
+    return 0;
+}

@@ -1,0 +1,17 @@
+fn main() {
+    let buf: int = System.Memory.Alloc(200)
+    let who: int = System.Memory.Alloc(64)
+    let a: int = Net.UdpOpen(18090)
+    let b: int = Net.UdpOpen(0)
+    Net.UdpSend(b, "127.0.0.1", 18090, "udp hi")
+    let n: int = Net.UdpRecv(a, buf, 150)
+    Net.Print(buf)
+    Net.Peer(who, 60)
+    Data.ShellPrint("<- udp from:")
+    Net.Print(who)
+    Data.ShellPrint("")
+    Net.Resolve("localhost", who, 60)
+    Net.Print(who)
+    Data.ShellPrint("<- localhost")
+    return 0
+}
