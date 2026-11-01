@@ -1,0 +1,2183 @@
+// Purplecode direct-backend runtime prelude.
+// Written in Purplecode on top of raw Linux syscalls so File.*, Net.*, encoders etc. work with no C runtime.
+// Only the functions a program actually reaches are linked in. Regenerate prelude.c with tools/genprelude.py.
+// Globals live at Rt.Global(): +0 net status, +8 peer text, +128 last encode result, +256 stat buf,
+// +512 pollfd, +768 sockaddr, +832 from-sockaddr, +848 socklen, +900 itoa scratch, +960 optval.
+
+fn pc_strlen(s) {
+    let n: int = 0;
+    while Memory.Read8(s + n) != 0 { n = n + 1; }
+    return n;
+}
+
+fn pc_strcmp(a, b) {
+    let i: int = 0;
+    let r: int = 0;
+    let fin: int = 0;
+    while fin == 0 {
+        let x: int = Memory.Read8(a + i);
+        let y: int = Memory.Read8(b + i);
+        if x != y { r = x - y; fin = 1; } else { if x == 0 { fin = 1; } }
+        i = i + 1;
+    }
+    return r;
+}
+
+fn pc_cat(dst, off, s) {
+    let i: int = 0;
+    let c: int = Memory.Read8(s);
+    while c != 0 {
+        Memory.Write8(dst + off + i, c);
+        i = i + 1;
+        c = Memory.Read8(s + i);
+    }
+    Memory.Write8(dst + off + i, 0);
+    return off + i;
+}
+
+fn pc_crlf(dst, off) {
+    Memory.Write8(dst + off, 13);
+    Memory.Write8(dst + off + 1, 10);
+    Memory.Write8(dst + off + 2, 0);
+    return off + 2;
+}
+
+fn pc_catn(dst, off, n) {
+    if n < 0 { Memory.Write8(dst + off, 45); off = off + 1; n = 0 - n; }
+    if n == 0 { Memory.Write8(dst + off, 48); Memory.Write8(dst + off + 1, 0); return off + 1; }
+    let tmp: int = Rt.Global() + 900;
+    let k: int = 0;
+    while n > 0 { Memory.Write8(tmp + k, 48 + n % 10); n = n / 10; k = k + 1; }
+    while k > 0 { k = k - 1; Memory.Write8(dst + off, Memory.Read8(tmp + k)); off = off + 1; }
+    Memory.Write8(dst + off, 0);
+    return off;
+}
+
+fn pc_write_all(fd, buf, len) {
+    let done: int = 0;
+    let go: int = 1;
+    while go == 1 && done < len {
+        let n: int = Kernel.Call(1, fd, buf + done, len - done);
+        if n <= 0 { go = 0; } else { done = done + n; }
+    }
+    return done;
+}
+
+fn pc_stat(path) {
+    let st: int = Rt.Global() + 256;
+    return Kernel.Call(4, path, st);
+}
+
+// ---------------------------------------------------------------- File.*
+
+fn File.Read(path, buf, max) {
+    if path == 0 { return -1; }
+    if buf == 0 { return -1; }
+    if max < 0 { return -1; }
+    let fd: int = Kernel.Call(2, path, 0, 0);
+    if fd < 0 { return -1; }
+    let total: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        if total >= max { go = 0; } else {
+            let n: int = Kernel.Call(0, fd, buf + total, max - total);
+            if n <= 0 { go = 0; } else { total = total + n; }
+        }
+    }
+    Kernel.Call(3, fd);
+    Memory.Write8(buf + total, 0);
+    return total;
+}
+
+fn pc_file_put(path, s, flags) {
+    if path == 0 { return -1; }
+    let fd: int = Kernel.Call(2, path, flags, 420);
+    if fd < 0 { return -1; }
+    let n: int = 0;
+    if s != 0 { n = pc_write_all(fd, s, pc_strlen(s)); }
+    Kernel.Call(3, fd);
+    return n;
+}
+
+fn File.Write(path, s) { return pc_file_put(path, s, 577); }
+fn File.Append(path, s) { return pc_file_put(path, s, 1089); }
+
+fn File.Delete(path) {
+    if path == 0 { return -1; }
+    let r: int = Kernel.Call(87, path);
+    if r != 0 { r = Kernel.Call(84, path); }
+    if r == 0 { return 0; }
+    return -1;
+}
+
+fn File.Mkdir(path) {
+    if path == 0 { return -1; }
+    let r: int = Kernel.Call(83, path, 493);
+    if r == 0 { return 0; }
+    if r == -17 { return 0; }
+    return -1;
+}
+
+fn File.Rename(a, b) {
+    if a == 0 { return -1; }
+    if b == 0 { return -1; }
+    if Kernel.Call(82, a, b) == 0 { return 0; }
+    return -1;
+}
+
+fn File.Exists(path) {
+    if path == 0 { return 0; }
+    if pc_stat(path) == 0 { return 1; }
+    return 0;
+}
+
+fn File.IsDir(path) {
+    if path == 0 { return 0; }
+    if pc_stat(path) != 0 { return 0; }
+    let mode: int = Memory.Read32(Rt.Global() + 256 + 24);
+    if (mode & 61440) == 16384 { return 1; }
+    return 0;
+}
+
+fn File.Size(path) {
+    if path == 0 { return -1; }
+    if pc_stat(path) != 0 { return -1; }
+    return Memory.Read64(Rt.Global() + 256 + 48);
+}
+
+fn File.Copy(a, b) {
+    if a == 0 { return -1; }
+    if b == 0 { return -1; }
+    let src: int = Kernel.Call(2, a, 0, 0);
+    if src < 0 { return -1; }
+    let dst: int = Kernel.Call(2, b, 577, 420);
+    if dst < 0 { Kernel.Call(3, src); return -1; }
+    let buf: int = Memory.Alloc(8192);
+    let total: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        let n: int = Kernel.Call(0, src, buf, 8192);
+        if n <= 0 { go = 0; } else { pc_write_all(dst, buf, n); total = total + n; }
+    }
+    Memory.Free(buf);
+    Kernel.Call(3, src);
+    Kernel.Call(3, dst);
+    return total;
+}
+
+fn File.Print(path) {
+    if path == 0 { return -1; }
+    let fd: int = Kernel.Call(2, path, 0, 0);
+    if fd < 0 { return -1; }
+    let buf: int = Memory.Alloc(4096);
+    let total: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        let n: int = Kernel.Call(0, fd, buf, 4096);
+        if n <= 0 { go = 0; } else { pc_write_all(1, buf, n); total = total + n; }
+    }
+    Memory.Free(buf);
+    Kernel.Call(3, fd);
+    return total;
+}
+
+fn pc_isdots(name) {
+    let a: int = Memory.Read8(name);
+    let b: int = Memory.Read8(name + 1);
+    let c: int = Memory.Read8(name + 2);
+    if a == 46 && b == 0 { return 1; }
+    if a == 46 && b == 46 && c == 0 { return 1; }
+    return 0;
+}
+
+// Sorted (strcmp order) array of entry-name pointers; the last element is the backing buffer. 0 on error.
+fn pc_dirlist(dir) {
+    if dir == 0 { return 0; }
+    let fd: int = Kernel.Call(2, dir, 65536, 0);
+    if fd < 0 { return 0; }
+    let cap: int = 262144;
+    let buf: int = Memory.Alloc(cap);
+    let total: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        let n: int = Kernel.Call(217, fd, buf + total, cap - total);
+        if n <= 0 { go = 0; } else {
+            total = total + n;
+            if cap - total < 4096 { go = 0; }
+        }
+    }
+    Kernel.Call(3, fd);
+    let count: int = 0;
+    let off: int = 0;
+    while off < total {
+        let rl: int = Memory.Read16(buf + off + 16);
+        if pc_isdots(buf + off + 19) == 0 { count = count + 1; }
+        off = off + rl;
+    }
+    let arr = Array.New(count + 1);
+    let idx: int = 0;
+    off = 0;
+    while off < total {
+        let rl2: int = Memory.Read16(buf + off + 16);
+        if pc_isdots(buf + off + 19) == 0 { Array.Set(arr, idx, buf + off + 19); idx = idx + 1; }
+        off = off + rl2;
+    }
+    Array.Set(arr, count, buf);
+    let i: int = 1;
+    while i < count {
+        let key: int = Array.Get(arr, i);
+        let j: int = i - 1;
+        let go2: int = 1;
+        while go2 == 1 {
+            if j < 0 { go2 = 0; } else {
+                let cur: int = Array.Get(arr, j);
+                if pc_strcmp(cur, key) > 0 { Array.Set(arr, j + 1, cur); j = j - 1; } else { go2 = 0; }
+            }
+        }
+        Array.Set(arr, j + 1, key);
+        i = i + 1;
+    }
+    return arr;
+}
+
+fn File.Count(dir) {
+    let arr: int = pc_dirlist(dir);
+    if arr == 0 { return -1; }
+    let count: int = Array.Len(arr) - 1;
+    Memory.Free(Array.Get(arr, count));
+    Array.Free(arr);
+    return count;
+}
+
+fn File.Name(dir, index, buf, max) {
+    let arr: int = pc_dirlist(dir);
+    if arr == 0 { return -1; }
+    let count: int = Array.Len(arr) - 1;
+    let r: int = -1;
+    if buf != 0 && index >= 0 && index < count && max >= 1 {
+        let name: int = Array.Get(arr, index);
+        let len: int = pc_strlen(name);
+        if len > max { len = max; }
+        let i: int = 0;
+        while i < len { Memory.Write8(buf + i, Memory.Read8(name + i)); i = i + 1; }
+        Memory.Write8(buf + len, 0);
+        r = len;
+    }
+    Memory.Free(Array.Get(arr, count));
+    Array.Free(arr);
+    return r;
+}
+
+// ---------------------------------------------------------------- Net.* helpers
+
+fn pc_sockaddr(ip, port) {
+    let sa: int = Rt.Global() + 768;
+    Memory.Write64(sa, 0);
+    Memory.Write64(sa + 8, 0);
+    Memory.Write16(sa, 2);
+    Memory.Write8(sa + 2, (port >> 8) & 255);
+    Memory.Write8(sa + 3, port & 255);
+    Memory.Write8(sa + 4, (ip >> 24) & 255);
+    Memory.Write8(sa + 5, (ip >> 16) & 255);
+    Memory.Write8(sa + 6, (ip >> 8) & 255);
+    Memory.Write8(sa + 7, ip & 255);
+    return sa;
+}
+
+fn pc_parse_ip(s) {
+    let ip: int = 0;
+    let part: int = 0;
+    let dots: int = 0;
+    let digits: int = 0;
+    let ok: int = 1;
+    let i: int = 0;
+    let c: int = Memory.Read8(s);
+    while c != 0 {
+        if c >= 48 && c <= 57 {
+            part = part * 10 + (c - 48);
+            digits = digits + 1;
+            if part > 255 { ok = 0; }
+        } else {
+            if c == 46 {
+                if digits == 0 { ok = 0; }
+                ip = ip * 256 + part;
+                part = 0;
+                digits = 0;
+                dots = dots + 1;
+            } else { ok = 0; }
+        }
+        i = i + 1;
+        c = Memory.Read8(s + i);
+    }
+    if ok == 0 { return -1; }
+    if dots != 3 { return -1; }
+    if digits == 0 { return -1; }
+    return ip * 256 + part;
+}
+
+fn pc_skipws(buf, pos, n) {
+    let go: int = 1;
+    while go == 1 && pos < n {
+        let c: int = Memory.Read8(buf + pos);
+        if c == 32 || c == 9 || c == 13 { pos = pos + 1; } else { go = 0; }
+    }
+    return pos;
+}
+
+fn pc_skipline(buf, pos, n) {
+    while pos < n && Memory.Read8(buf + pos) != 10 { pos = pos + 1; }
+    if pos < n { pos = pos + 1; }
+    return pos;
+}
+
+fn pc_token(buf, pos, out, n) {
+    let k: int = 0;
+    let go: int = 1;
+    while go == 1 && pos < n && k < 255 {
+        let c: int = Memory.Read8(buf + pos);
+        if c == 32 || c == 9 || c == 13 || c == 10 || c == 0 { go = 0; } else { Memory.Write8(out + k, c); k = k + 1; pos = pos + 1; }
+    }
+    Memory.Write8(out + k, 0);
+    return pos;
+}
+
+fn pc_hosts_lookup(host) {
+    let buf: int = Memory.Alloc(32769);
+    let n: int = File.Read("/etc/hosts", buf, 32768);
+    let res: int = -1;
+    if n > 0 {
+        let tok: int = Memory.Alloc(512);
+        let pos: int = 0;
+        while pos < n && res < 0 {
+            let lineip: int = -2;
+            let first: int = 1;
+            let eol: int = 0;
+            while eol == 0 {
+                pos = pc_skipws(buf, pos, n);
+                if pos >= n { eol = 1; } else {
+                    let c: int = Memory.Read8(buf + pos);
+                    if c == 10 { pos = pos + 1; eol = 1; } else {
+                        if c == 35 { pos = pc_skipline(buf, pos, n); eol = 1; } else {
+                            pos = pc_token(buf, pos, tok, n);
+                            if first == 1 { lineip = pc_parse_ip(tok); first = 0; } else {
+                                if lineip >= 0 { if pc_strcmp(tok, host) == 0 { res = lineip; } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Memory.Free(tok);
+    }
+    Memory.Free(buf);
+    return res;
+}
+
+fn pc_skip_name(b, pos, n) {
+    let go: int = 1;
+    while go == 1 && pos < n {
+        let len: int = Memory.Read8(b + pos);
+        if len == 0 { pos = pos + 1; go = 0; } else {
+            if len >= 192 { pos = pos + 2; go = 0; } else { pos = pos + 1 + len; }
+        }
+    }
+    return pos;
+}
+
+fn pc_nameserver() {
+    let buf: int = Memory.Alloc(4097);
+    let n: int = File.Read("/etc/resolv.conf", buf, 4096);
+    let ns: int = 2130706433;
+    if n > 0 {
+        let tok: int = Memory.Alloc(512);
+        let pos: int = 0;
+        let found: int = 0;
+        while pos < n && found == 0 {
+            let first: int = 1;
+            let is_ns: int = 0;
+            let eol: int = 0;
+            while eol == 0 {
+                pos = pc_skipws(buf, pos, n);
+                if pos >= n { eol = 1; } else {
+                    let c: int = Memory.Read8(buf + pos);
+                    if c == 10 { pos = pos + 1; eol = 1; } else {
+                        if c == 35 || c == 59 { pos = pc_skipline(buf, pos, n); eol = 1; } else {
+                            pos = pc_token(buf, pos, tok, n);
+                            if first == 1 { if pc_strcmp(tok, "nameserver") == 0 { is_ns = 1; } first = 0; } else {
+                                if is_ns == 1 && found == 0 {
+                                    let ip: int = pc_parse_ip(tok);
+                                    if ip >= 0 { ns = ip; found = 1; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Memory.Free(tok);
+    }
+    Memory.Free(buf);
+    return ns;
+}
+
+fn pc_dns_lookup(host) {
+    let hl: int = pc_strlen(host);
+    if hl == 0 { return -1; }
+    if hl > 253 { return -1; }
+    let ns: int = pc_nameserver();
+    let q: int = Memory.Alloc(600);
+    Memory.Write8(q, 18);
+    Memory.Write8(q + 1, 52);
+    Memory.Write8(q + 2, 1);
+    Memory.Write8(q + 5, 1);
+    let pos: int = 13;
+    let lstart: int = 12;
+    let i: int = 0;
+    while i < hl {
+        let c: int = Memory.Read8(host + i);
+        if c == 46 {
+            Memory.Write8(q + lstart, pos - lstart - 1);
+            lstart = pos;
+            pos = pos + 1;
+        } else {
+            Memory.Write8(q + pos, c);
+            pos = pos + 1;
+        }
+        i = i + 1;
+    }
+    Memory.Write8(q + lstart, pos - lstart - 1);
+    Memory.Write8(q + pos, 0);
+    Memory.Write8(q + pos + 2, 1);
+    Memory.Write8(q + pos + 4, 1);
+    let qlen: int = pos + 5;
+    let res: int = -1;
+    let fd: int = Kernel.Call(41, 2, 2, 0);
+    if fd >= 0 {
+        let sa: int = pc_sockaddr(ns, 53);
+        let sent: int = Kernel.Call(44, fd, q, qlen, 0, sa, 16);
+        if sent > 0 {
+            let pf: int = Rt.Global() + 512;
+            Memory.Write32(pf, fd);
+            Memory.Write16(pf + 4, 1);
+            Memory.Write16(pf + 6, 0);
+            if Kernel.Call(7, pf, 1, 3000) > 0 {
+                let rb: int = Memory.Alloc(1600);
+                let n: int = Kernel.Call(45, fd, rb, 1500, 0, 0, 0);
+                if n >= 12 && (Memory.Read8(rb + 3) & 15) == 0 {
+                    let an: int = Memory.Read8(rb + 6) * 256 + Memory.Read8(rb + 7);
+                    let p: int = pc_skip_name(rb, 12, n) + 4;
+                    let k: int = 0;
+                    while k < an && p + 10 <= n && res < 0 {
+                        p = pc_skip_name(rb, p, n);
+                        let ty: int = Memory.Read8(rb + p) * 256 + Memory.Read8(rb + p + 1);
+                        let rl: int = Memory.Read8(rb + p + 8) * 256 + Memory.Read8(rb + p + 9);
+                        p = p + 10;
+                        if ty == 1 && rl == 4 && p + 4 <= n {
+                            res = Memory.Read8(rb + p) * 16777216 + Memory.Read8(rb + p + 1) * 65536 + Memory.Read8(rb + p + 2) * 256 + Memory.Read8(rb + p + 3);
+                        }
+                        p = p + rl;
+                        k = k + 1;
+                    }
+                }
+                Memory.Free(rb);
+            }
+        }
+        Kernel.Call(3, fd);
+    }
+    Memory.Free(q);
+    return res;
+}
+
+fn pc_resolve(host) {
+    if host == 0 { return -1; }
+    let ip: int = pc_parse_ip(host);
+    if ip >= 0 { return ip; }
+    if pc_strcmp(host, "localhost") == 0 { return 2130706433; }
+    ip = pc_hosts_lookup(host);
+    if ip >= 0 { return ip; }
+    return pc_dns_lookup(host);
+}
+
+// ---------------------------------------------------------------- Net.*
+
+fn Net.Connect(host, port) {
+    if host == 0 { return -1; }
+    let ip: int = pc_resolve(host);
+    if ip < 0 { return -1; }
+    let fd: int = Kernel.Call(41, 2, 1, 0);
+    if fd < 0 { return -1; }
+    let sa: int = pc_sockaddr(ip, port);
+    if Kernel.Call(42, fd, sa, 16) < 0 { Kernel.Call(3, fd); return -1; }
+    return fd;
+}
+
+fn pc_reuse(fd) {
+    let opt: int = Rt.Global() + 960;
+    Memory.Write64(opt, 1);
+    Kernel.Call(54, fd, 1, 2, opt, 4);
+    return 0;
+}
+
+fn Net.Listen(port) {
+    let fd: int = Kernel.Call(41, 2, 1, 0);
+    if fd < 0 { return -1; }
+    pc_reuse(fd);
+    let sa: int = pc_sockaddr(0, port);
+    if Kernel.Call(49, fd, sa, 16) < 0 { Kernel.Call(3, fd); return -1; }
+    if Kernel.Call(50, fd, 32) < 0 { Kernel.Call(3, fd); return -1; }
+    return fd;
+}
+
+fn Net.Accept(fd) {
+    let r: int = Kernel.Call(43, fd, 0, 0);
+    if r < 0 { return -1; }
+    return r;
+}
+
+fn pc_poll_in(fd, ms) {
+    let pf: int = Rt.Global() + 512;
+    Memory.Write32(pf, fd);
+    Memory.Write16(pf + 4, 1);
+    Memory.Write16(pf + 6, 0);
+    return Kernel.Call(7, pf, 1, ms);
+}
+
+fn Net.AcceptTimeout(fd, ms) {
+    let r: int = pc_poll_in(fd, ms);
+    if r < 0 { return -1; }
+    if r == 0 { return 0; }
+    let c: int = Kernel.Call(43, fd, 0, 0);
+    if c < 0 { return -1; }
+    return c;
+}
+
+fn Net.SendBuf(fd, buf, len) {
+    let tot: int = 0;
+    let go: int = 1;
+    while go == 1 && tot < len {
+        let n: int = Kernel.Call(44, fd, buf + tot, len - tot, 16384, 0, 0);
+        if n <= 0 { go = 0; } else { tot = tot + n; }
+    }
+    if tot == 0 && len > 0 { return -1; }
+    return tot;
+}
+
+fn Net.Send(fd, s) {
+    if s == 0 { return -1; }
+    return Net.SendBuf(fd, s, pc_strlen(s));
+}
+
+fn Net.Recv(fd, buf, max) {
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    let n: int = Kernel.Call(45, fd, buf, max, 0, 0, 0);
+    if n < 0 { return -1; }
+    Memory.Write8(buf + n, 0);
+    return n;
+}
+
+fn Net.RecvTimeout(fd, buf, max, ms) {
+    let r: int = pc_poll_in(fd, ms);
+    if r == 0 { return -2; }
+    if r < 0 { return -1; }
+    return Net.Recv(fd, buf, max);
+}
+
+fn Net.RecvLine(fd, buf, max) {
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    let one: int = Rt.Global() + 1000;
+    let n: int = 0;
+    let go: int = 1;
+    while go == 1 && n < max {
+        let r: int = Kernel.Call(45, fd, one, 1, 0, 0, 0);
+        if r <= 0 {
+            if n == 0 { return -1; }
+            go = 0;
+        } else {
+            let c: int = Memory.Read8(one);
+            if c == 10 { go = 0; } else { if c != 13 { Memory.Write8(buf + n, c); n = n + 1; } }
+        }
+    }
+    Memory.Write8(buf + n, 0);
+    return n;
+}
+
+fn Net.Close(fd) { return Kernel.Call(3, fd); }
+
+fn Net.UdpOpen(port) {
+    let fd: int = Kernel.Call(41, 2, 2, 0);
+    if fd < 0 { return -1; }
+    pc_reuse(fd);
+    let opt: int = Rt.Global() + 960;
+    Memory.Write64(opt, 1);
+    Kernel.Call(54, fd, 1, 6, opt, 4);
+    let sa: int = pc_sockaddr(0, port);
+    if Kernel.Call(49, fd, sa, 16) < 0 { Kernel.Call(3, fd); return -1; }
+    return fd;
+}
+
+fn Net.UdpSend(fd, host, port, s) {
+    if host == 0 { return -1; }
+    if s == 0 { return -1; }
+    let ip: int = pc_resolve(host);
+    if ip < 0 { return -1; }
+    let sa: int = pc_sockaddr(ip, port);
+    return Kernel.Call(44, fd, s, pc_strlen(s), 0, sa, 16);
+}
+
+fn Net.UdpRecv(fd, buf, max) {
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    let from: int = Rt.Global() + 832;
+    let fl: int = Rt.Global() + 848;
+    Memory.Write32(fl, 16);
+    let n: int = Kernel.Call(45, fd, buf, max, 0, from, fl);
+    if n < 0 { return -1; }
+    Memory.Write8(buf + n, 0);
+    let peer: int = Rt.Global() + 8;
+    let off: int = pc_catn(peer, 0, Memory.Read8(from + 4));
+    off = pc_cat(peer, off, ".");
+    off = pc_catn(peer, off, Memory.Read8(from + 5));
+    off = pc_cat(peer, off, ".");
+    off = pc_catn(peer, off, Memory.Read8(from + 6));
+    off = pc_cat(peer, off, ".");
+    off = pc_catn(peer, off, Memory.Read8(from + 7));
+    off = pc_cat(peer, off, ":");
+    off = pc_catn(peer, off, Memory.Read8(from + 2) * 256 + Memory.Read8(from + 3));
+    return n;
+}
+
+fn pc_copy_out(src, buf, max) {
+    let len: int = pc_strlen(src);
+    if len > max { len = max; }
+    let i: int = 0;
+    while i < len { Memory.Write8(buf + i, Memory.Read8(src + i)); i = i + 1; }
+    Memory.Write8(buf + len, 0);
+    return len;
+}
+
+fn Net.Peer(buf, max) {
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    return pc_copy_out(Rt.Global() + 8, buf, max);
+}
+
+fn Net.Print(s) {
+    if s == 0 { return -1; }
+    let n: int = pc_strlen(s);
+    pc_write_all(1, s, n);
+    return n;
+}
+
+fn Net.Resolve(host, buf, max) {
+    if host == 0 { return -1; }
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    let ip: int = pc_resolve(host);
+    if ip < 0 { return -1; }
+    let tmp: int = Memory.Alloc(64);
+    let off: int = pc_catn(tmp, 0, (ip >> 24) & 255);
+    off = pc_cat(tmp, off, ".");
+    off = pc_catn(tmp, off, (ip >> 16) & 255);
+    off = pc_cat(tmp, off, ".");
+    off = pc_catn(tmp, off, (ip >> 8) & 255);
+    off = pc_cat(tmp, off, ".");
+    off = pc_catn(tmp, off, ip & 255);
+    let len: int = pc_copy_out(tmp, buf, max);
+    Memory.Free(tmp);
+    return len;
+}
+
+fn Net.HostName(buf, max) {
+    if buf == 0 { return -1; }
+    if max < 1 { return -1; }
+    let u: int = Memory.Alloc(512);
+    if Kernel.Call(63, u) != 0 { Memory.Free(u); return -1; }
+    let len: int = pc_copy_out(u + 65, buf, max);
+    Memory.Free(u);
+    return len;
+}
+
+fn Net.Status() { return Memory.Read64(Rt.Global()); }
+
+fn pc_find_crlf2(b, len) {
+    let i: int = 0;
+    while i + 3 < len {
+        if Memory.Read8(b + i) == 13 && Memory.Read8(b + i + 1) == 10 && Memory.Read8(b + i + 2) == 13 && Memory.Read8(b + i + 3) == 10 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn pc_http_do(host, port, req, outfile) {
+    let fd: int = Net.Connect(host, port);
+    if fd < 0 { return -1; }
+    if Net.Send(fd, req) < 0 { Net.Close(fd); return -1; }
+    let cap: int = 67108864;
+    let b: int = Memory.Alloc(cap + 1);
+    if b == 0 { Net.Close(fd); return -1; }
+    let len: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        if len + 4097 > cap { go = 0; } else {
+            let n: int = Kernel.Call(45, fd, b + len, cap - len - 1, 0, 0, 0);
+            if n <= 0 { go = 0; } else { len = len + n; }
+        }
+    }
+    Net.Close(fd);
+    let st: int = 0;
+    if len > 12 && Memory.Read8(b) == 72 && Memory.Read8(b + 1) == 84 && Memory.Read8(b + 2) == 84 && Memory.Read8(b + 3) == 80 && Memory.Read8(b + 4) == 47 {
+        let k: int = 9;
+        while Memory.Read8(b + k) >= 48 && Memory.Read8(b + k) <= 57 { st = st * 10 + (Memory.Read8(b + k) - 48); k = k + 1; }
+    }
+    Memory.Write64(Rt.Global(), st);
+    let hdr: int = pc_find_crlf2(b, len);
+    let off: int = len;
+    if hdr >= 0 { off = hdr + 4; }
+    let blen: int = len - off;
+    let to_file: int = 0;
+    if outfile != 0 {
+        if Memory.Read8(outfile) != 0 {
+            if pc_strcmp(outfile, "-") != 0 { to_file = 1; }
+        }
+    }
+    if to_file == 1 {
+        let ofd: int = Kernel.Call(2, outfile, 577, 420);
+        if ofd < 0 { Memory.Free(b); return -1; }
+        pc_write_all(ofd, b + off, blen);
+        Kernel.Call(3, ofd);
+    } else {
+        pc_write_all(1, b + off, blen);
+    }
+    Memory.Free(b);
+    return blen;
+}
+
+fn Net.HttpGet(host, port, path, outfile) {
+    if host == 0 { return -1; }
+    if path == 0 { return -1; }
+    let req: int = Memory.Alloc(pc_strlen(host) + pc_strlen(path) + 256);
+    let off: int = pc_cat(req, 0, "GET ");
+    off = pc_cat(req, off, path);
+    off = pc_cat(req, off, " HTTP/1.0");
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Host: ");
+    off = pc_cat(req, off, host);
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "User-Agent: Purplecode/2.1");
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Connection: close");
+    off = pc_crlf(req, off);
+    off = pc_crlf(req, off);
+    let r: int = pc_http_do(host, port, req, outfile);
+    Memory.Free(req);
+    return r;
+}
+
+fn Net.HttpPost(host, port, path, body, outfile) {
+    if host == 0 { return -1; }
+    if path == 0 { return -1; }
+    if body == 0 { return -1; }
+    let req: int = Memory.Alloc(pc_strlen(host) + pc_strlen(path) + pc_strlen(body) + 512);
+    let off: int = pc_cat(req, 0, "POST ");
+    off = pc_cat(req, off, path);
+    off = pc_cat(req, off, " HTTP/1.0");
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Host: ");
+    off = pc_cat(req, off, host);
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "User-Agent: Purplecode/2.1");
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Content-Type: text/plain");
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Content-Length: ");
+    off = pc_catn(req, off, pc_strlen(body));
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, "Connection: close");
+    off = pc_crlf(req, off);
+    off = pc_crlf(req, off);
+    off = pc_cat(req, off, body);
+    let r: int = pc_http_do(host, port, req, outfile);
+    Memory.Free(req);
+    return r;
+}
+
+// ---------------------------------------------------------------- static HTTP server
+
+fn pc_mime(path) {
+    let n: int = pc_strlen(path);
+    let i: int = n - 1;
+    let dot: int = -1;
+    while i >= 0 && dot < 0 {
+        if Memory.Read8(path + i) == 46 { dot = i; }
+        i = i - 1;
+    }
+    if dot < 0 { return "application/octet-stream"; }
+    let e: int = path + dot;
+    if pc_strcmp(e, ".html") == 0 { return "text/html; charset=utf-8"; }
+    if pc_strcmp(e, ".htm") == 0 { return "text/html; charset=utf-8"; }
+    if pc_strcmp(e, ".css") == 0 { return "text/css"; }
+    if pc_strcmp(e, ".js") == 0 { return "text/javascript"; }
+    if pc_strcmp(e, ".json") == 0 { return "application/json"; }
+    if pc_strcmp(e, ".txt") == 0 { return "text/plain; charset=utf-8"; }
+    if pc_strcmp(e, ".png") == 0 { return "image/png"; }
+    if pc_strcmp(e, ".jpg") == 0 { return "image/jpeg"; }
+    if pc_strcmp(e, ".jpeg") == 0 { return "image/jpeg"; }
+    if pc_strcmp(e, ".gif") == 0 { return "image/gif"; }
+    if pc_strcmp(e, ".svg") == 0 { return "image/svg+xml"; }
+    if pc_strcmp(e, ".ico") == 0 { return "image/x-icon"; }
+    if pc_strcmp(e, ".wasm") == 0 { return "application/wasm"; }
+    if pc_strcmp(e, ".ppm") == 0 { return "image/x-portable-pixmap"; }
+    return "application/octet-stream";
+}
+
+fn pc_reply(c, code, msg, mime, body, n, head) {
+    let h: int = Memory.Alloc(1024);
+    let off: int = pc_cat(h, 0, "HTTP/1.0 ");
+    off = pc_catn(h, off, code);
+    off = pc_cat(h, off, " ");
+    off = pc_cat(h, off, msg);
+    off = pc_crlf(h, off);
+    off = pc_cat(h, off, "Content-Type: ");
+    off = pc_cat(h, off, mime);
+    off = pc_crlf(h, off);
+    off = pc_cat(h, off, "Content-Length: ");
+    off = pc_catn(h, off, n);
+    off = pc_crlf(h, off);
+    off = pc_cat(h, off, "Server: Purplecode/2.1");
+    off = pc_crlf(h, off);
+    off = pc_cat(h, off, "Connection: close");
+    off = pc_crlf(h, off);
+    off = pc_crlf(h, off);
+    Net.SendBuf(c, h, off);
+    if head == 0 && n > 0 { Net.SendBuf(c, body, n); }
+    Memory.Free(h);
+    return 0;
+}
+
+fn pc_word(src, pos, dst, max) {
+    pos = pc_skipws(src, pos, 8192);
+    let k: int = 0;
+    let go: int = 1;
+    while go == 1 {
+        let c: int = Memory.Read8(src + pos);
+        if c == 0 || c == 32 || c == 9 || c == 13 || c == 10 { go = 0; } else {
+            if k < max { Memory.Write8(dst + k, c); k = k + 1; }
+            pos = pos + 1;
+        }
+    }
+    Memory.Write8(dst + k, 0);
+    return pos;
+}
+
+fn pc_has_dotdot(s) {
+    let i: int = 0;
+    while Memory.Read8(s + i) != 0 {
+        if Memory.Read8(s + i) == 46 && Memory.Read8(s + i + 1) == 46 { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn pc_log(m, u, code, n) {
+    let lb: int = Memory.Alloc(1400);
+    let off: int = pc_cat(lb, 0, m);
+    off = pc_cat(lb, off, " ");
+    off = pc_cat(lb, off, u);
+    off = pc_cat(lb, off, " -> ");
+    off = pc_catn(lb, off, code);
+    if n >= 0 {
+        off = pc_cat(lb, off, " (");
+        off = pc_catn(lb, off, n);
+        off = pc_cat(lb, off, " bytes)");
+    }
+    off = pc_cat(lb, off, "\n");
+    pc_write_all(1, lb, off);
+    Memory.Free(lb);
+    return 0;
+}
+
+fn Net.HttpServe(port, dir, maxreq) {
+    if dir == 0 { return -1; }
+    let ls: int = Net.Listen(port);
+    if ls < 0 { return -1; }
+    let served: int = 0;
+    let rq: int = Memory.Alloc(8200);
+    let path: int = Memory.Alloc(4200);
+    let m: int = Memory.Alloc(16);
+    let u: int = Memory.Alloc(1100);
+    let run: int = 1;
+    while run == 1 && (maxreq <= 0 || served < maxreq) {
+        let c: int = Kernel.Call(43, ls, 0, 0);
+        if c < 0 { run = 0; } else {
+            let got: int = 0;
+            let more: int = 1;
+            while more == 1 && got < 8191 {
+                let n: int = Kernel.Call(45, c, rq + got, 8191 - got, 0, 0, 0);
+                if n <= 0 { more = 0; } else {
+                    got = got + n;
+                    Memory.Write8(rq + got, 0);
+                    if pc_find_crlf2(rq, got) >= 0 { more = 0; }
+                }
+            }
+            Memory.Write8(rq + got, 0);
+            let p1: int = pc_word(rq, 0, m, 7);
+            pc_word(rq, p1, u, 1023);
+            let head: int = 0;
+            if pc_strcmp(m, "HEAD") == 0 { head = 1; }
+            let qi: int = 0;
+            let qd: int = 1;
+            while qd == 1 {
+                let ch: int = Memory.Read8(u + qi);
+                if ch == 0 { qd = 0; } else { if ch == 63 { Memory.Write8(u + qi, 0); qd = 0; } else { qi = qi + 1; } }
+            }
+            if pc_strcmp(m, "GET") != 0 && head == 0 {
+                pc_reply(c, 405, "Method Not Allowed", "text/plain", "405\n", 4, 0);
+            } else {
+                if pc_has_dotdot(u) == 1 || Memory.Read8(u) != 47 {
+                    pc_reply(c, 400, "Bad Request", "text/plain", "400\n", 4, head);
+                } else {
+                    let pl: int = pc_cat(path, 0, dir);
+                    pc_cat(path, pl, u);
+                    if File.IsDir(path) == 1 {
+                        let l2: int = pc_strlen(path);
+                        if Memory.Read8(path + l2 - 1) == 47 { pc_cat(path, l2, "index.html"); } else { pc_cat(path, l2, "/index.html"); }
+                    }
+                    let fd: int = Kernel.Call(2, path, 0, 0);
+                    if fd < 0 {
+                        pc_reply(c, 404, "Not Found", "text/plain", "404 not found\n", 14, head);
+                        pc_log(m, u, 404, -1);
+                    } else {
+                        let sz: int = Kernel.Call(8, fd, 0, 2);
+                        Kernel.Call(8, fd, 0, 0);
+                        let data: int = Memory.Alloc(sz + 1);
+                        let rd: int = 0;
+                        let rg: int = 1;
+                        while rg == 1 && rd < sz {
+                            let r: int = Kernel.Call(0, fd, data + rd, sz - rd);
+                            if r <= 0 { rg = 0; } else { rd = rd + r; }
+                        }
+                        if rd == sz {
+                            pc_reply(c, 200, "OK", pc_mime(path), data, sz, head);
+                            pc_log(m, u, 200, sz);
+                        } else {
+                            pc_reply(c, 500, "Server Error", "text/plain", "500\n", 4, head);
+                        }
+                        Memory.Free(data);
+                        Kernel.Call(3, fd);
+                    }
+                }
+            }
+            Kernel.Call(3, c);
+            served = served + 1;
+        }
+    }
+    Kernel.Call(3, ls);
+    return served;
+}
+
+// ---------------------------------------------------------------- encoders and hex printing
+
+fn pc_set_result(out) {
+    let g: int = Rt.Global() + 128;
+    Memory.Free(Memory.Read64(g));
+    Memory.Write64(g, out);
+    return out;
+}
+
+fn Binarify(text) {
+    if text == 0 { return 0; }
+    let n: int = pc_strlen(text);
+    let out: string = Memory.Alloc(n * 8 + 1);
+    let i: int = 0;
+    let j: int = 0;
+    while i < n {
+        let ch: int = Memory.Read8(text + i);
+        let bit: int = 7;
+        while bit >= 0 {
+            if ((ch >> bit) & 1) == 1 { Memory.Write8(out + j, 49); } else { Memory.Write8(out + j, 48); }
+            j = j + 1;
+            bit = bit - 1;
+        }
+        i = i + 1;
+    }
+    pc_set_result(out);
+    return out;
+}
+
+fn pc_hexdigit(v) {
+    if v < 10 { return 48 + v; }
+    return 55 + v;
+}
+
+fn Hexify(text) {
+    if text == 0 { return 0; }
+    let n: int = pc_strlen(text);
+    let out: string = Memory.Alloc(n * 2 + 1);
+    let i: int = 0;
+    while i < n {
+        let ch: int = Memory.Read8(text + i);
+        Memory.Write8(out + i * 2, pc_hexdigit(ch >> 4));
+        Memory.Write8(out + i * 2 + 1, pc_hexdigit(ch & 15));
+        i = i + 1;
+    }
+    pc_set_result(out);
+    return out;
+}
+
+fn pc_b64char(v) {
+    if v < 26 { return 65 + v; }
+    if v < 52 { return 71 + v; }
+    if v < 62 { return v - 4; }
+    if v == 62 { return 43; }
+    return 47;
+}
+
+fn Base64ify(text) {
+    if text == 0 { return 0; }
+    let n: int = pc_strlen(text);
+    let out: string = Memory.Alloc(((n + 2) / 3) * 4 + 1);
+    let i: int = 0;
+    let j: int = 0;
+    while i < n {
+        let a: int = Memory.Read8(text + i);
+        let b: int = 0;
+        let c: int = 0;
+        if i + 1 < n { b = Memory.Read8(text + i + 1); }
+        if i + 2 < n { c = Memory.Read8(text + i + 2); }
+        Memory.Write8(out + j, pc_b64char(a >> 2));
+        Memory.Write8(out + j + 1, pc_b64char(((a & 3) << 4) | (b >> 4)));
+        if i + 1 < n { Memory.Write8(out + j + 2, pc_b64char(((b & 15) << 2) | (c >> 6))); } else { Memory.Write8(out + j + 2, 61); }
+        if i + 2 < n { Memory.Write8(out + j + 3, pc_b64char(c & 63)); } else { Memory.Write8(out + j + 3, 61); }
+        j = j + 4;
+        i = i + 3;
+    }
+    pc_set_result(out);
+    return out;
+}
+
+fn Encoding.LastResult() {
+    let r: string = Memory.Read64(Rt.Global() + 128);
+    if r == 0 { return ""; }
+    return r;
+}
+
+fn Data.ShellPrint.Hex(v) {
+    let buf: int = Rt.Global() + 1100;
+    Memory.Write8(buf, 48);
+    Memory.Write8(buf + 1, 120);
+    let off: int = 2;
+    let started: int = 0;
+    let i: int = 15;
+    while i >= 0 {
+        let d: int = (v >> (i * 4)) & 15;
+        if d != 0 || started == 1 || i == 0 {
+            Memory.Write8(buf + off, pc_hexdigit(d) + 32 * (d / 10));
+            off = off + 1;
+            started = 1;
+        }
+        i = i - 1;
+    }
+    Memory.Write8(buf + off, 10);
+    pc_write_all(1, buf, off + 1);
+    return 0;
+}
+
+// ---------------------------------------------------------------- Web loaders that need no engine
+
+fn Web.JS.Load(path) {
+    if path == 0 { return -1; }
+    let sz: int = File.Size(path);
+    if sz < 0 { return -1; }
+    if sz > 16777216 { return -1; }
+    let fd: int = Kernel.Call(2, path, 0, 0);
+    if fd < 0 { return -1; }
+    Kernel.Call(3, fd);
+    let b: int = Memory.Alloc(pc_strlen(path) + 160);
+    let off: int = pc_cat(b, 0, "[Web.JS] Loaded ");
+    off = pc_catn(b, off, sz);
+    off = pc_cat(b, off, " bytes from ");
+    off = pc_cat(b, off, path);
+    off = pc_cat(b, off, " (not executed; no JS engine configured)\n");
+    pc_write_all(1, b, off);
+    Memory.Free(b);
+    return sz;
+}
+
+// ================================================================ BlowUI + GUI (pure Purplecode renderer, X11 over a raw socket)
+// Integer/fixed-point port of runtime/purple_blow.inc. Coordinates inside pc_rr are in 1/256 pixel.
+// Globals (offsets from Rt.Global()): 2048 fb, 2056 w, 2064 h, 2072 theme, 2080 mx, 2088 my, 2096 down, 2104 released,
+// 2112 pressx, 2120 pressy, 2128 active, 2136 focus, 2144 closed, 2152 winopen, 2160 keyq count, 2168 keyq[32],
+// 2432 xfd, 2440 xwin, 2448 xgc, 2456 xroot, 2464 xidbase, 2472 xdepth, 2488 envp, 2496 font, 2504 maxreq bytes,
+// 2512 delete atom, 2520 keymap, 2528 keysyms/keycode, 2536 min keycode, 2544 theme init, 2560 close reported,
+// 2600 themes (3 x 11 x u32), 3000 x event, 3100 PutImage header.
+
+fn pc_g(o) { return Memory.Read64(Rt.Global() + o); }
+fn pc_gs(o, v) { Memory.Write64(Rt.Global() + o, v); return 0; }
+fn pc_abs(v) { if v < 0 { return 0 - v; } return v; }
+
+fn pc_hexval(c) {
+    if c >= 97 { return c - 87; }
+    if c >= 65 { return c - 55; }
+    return c - 48;
+}
+
+fn pc_font() {
+    let f: int = pc_g(2496);
+    if f != 0 { return f; }
+    f = Memory.Alloc(768);
+    let hx = "@@FONTHEX@@";
+    let i: int = 0;
+    while i < 760 {
+        Memory.Write8(f + i, pc_hexval(Memory.Read8(hx + i * 2)) * 16 + pc_hexval(Memory.Read8(hx + i * 2 + 1)));
+        i = i + 1;
+    }
+    pc_gs(2496, f);
+    return f;
+}
+
+fn pc_thset(t, a, b, c, d, e, f, g, h, i, j, k) {
+    Memory.Write32(t, a); Memory.Write32(t + 4, b); Memory.Write32(t + 8, c); Memory.Write32(t + 12, d);
+    Memory.Write32(t + 16, e); Memory.Write32(t + 20, f); Memory.Write32(t + 24, g); Memory.Write32(t + 28, h);
+    Memory.Write32(t + 32, i); Memory.Write32(t + 36, j); Memory.Write32(t + 40, k);
+    return 0;
+}
+
+fn pc_bt(f) {
+    if pc_g(2544) == 0 {
+        let t: int = Rt.Global() + 2600;
+        pc_thset(t, 0x12101C, 0x1B1830, 0x26224A, 0x34305C, 0xECE9FF, 0x9A95C4, 0x8B5CF6, 0xA78BFA, 0x6D43D6, 0x34D399, 0xF87171);
+        pc_thset(t + 44, 0xF4F3FA, 0xFFFFFF, 0xEDEBF7, 0xD9D6EC, 0x1F1B3A, 0x6B6890, 0x7C4DFF, 0x9575FF, 0x5E35D8, 0x10B981, 0xEF4444);
+        pc_thset(t + 88, 0x0B1220, 0x111A2E, 0x1A2647, 0x26365F, 0xE6EEFF, 0x8FA3CC, 0x3B82F6, 0x60A5FA, 0x2563EB, 0x22C55E, 0xF43F5E);
+        pc_gs(2544, 1);
+    }
+    return Memory.Read32(Rt.Global() + 2600 + (pc_g(2072) * 11 + f) * 4);
+}
+
+fn pc_fb_ensure(w, h) {
+    let fb: int = pc_g(2048);
+    if fb != 0 && pc_g(2056) == w && pc_g(2064) == h { return 0; }
+    if fb != 0 { Memory.Free(fb); }
+    fb = Memory.Alloc(w * h * 4 + 4);
+    pc_gs(2048, fb);
+    pc_gs(2056, w);
+    pc_gs(2064, h);
+    return 0;
+}
+
+fn pc_setpx(x, y, color) {
+    let fb: int = pc_g(2048);
+    let w: int = pc_g(2056);
+    if fb == 0 { return 0; }
+    if x < 0 || y < 0 || x >= w || y >= pc_g(2064) { return 0; }
+    if (color & 0xFF000000) == 0 { color = color | 0xFF000000; }
+    Memory.Write32(fb + (y * w + x) * 4, color);
+    return 0;
+}
+
+fn pc_fill(x, y, w, h, color) {
+    let fb: int = pc_g(2048);
+    if fb == 0 || w <= 0 || h <= 0 { return 0; }
+    if (color & 0xFF000000) == 0 { color = color | 0xFF000000; }
+    let fw: int = pc_g(2056);
+    let fh: int = pc_g(2064);
+    if x < 0 { w = w + x; x = 0; }
+    if y < 0 { h = h + y; y = 0; }
+    if x + w > fw { w = fw - x; }
+    if y + h > fh { h = fh - y; }
+    if w <= 0 || h <= 0 { return 0; }
+    let row: int = y;
+    while row < y + h {
+        let p: int = fb + (row * fw + x) * 4;
+        let col: int = 0;
+        while col < w { Memory.Write32(p + col * 4, color); col = col + 1; }
+        row = row + 1;
+    }
+    return 0;
+}
+
+fn pc_clear(color) {
+    let fb: int = pc_g(2048);
+    if fb == 0 { return 0; }
+    if (color & 0xFF000000) == 0 { color = color | 0xFF000000; }
+    let n: int = pc_g(2056) * pc_g(2064);
+    let i: int = 0;
+    while i < n { Memory.Write32(fb + i * 4, color); i = i + 1; }
+    return 0;
+}
+
+fn pc_line(x0, y0, x1, y1, color) {
+    if pc_g(2048) == 0 { return 0; }
+    let dx: int = pc_abs(x1 - x0);
+    let sx: int = 1;
+    if x0 >= x1 { sx = -1; }
+    let dy: int = 0 - pc_abs(y1 - y0);
+    let sy: int = 1;
+    if y0 >= y1 { sy = -1; }
+    let err: int = dx + dy;
+    let go: int = 1;
+    while go == 1 {
+        pc_setpx(x0, y0, color);
+        if x0 == x1 && y0 == y1 { go = 0; } else {
+            let e2: int = err * 2;
+            if e2 >= dy { err = err + dy; x0 = x0 + sx; }
+            if e2 <= dx { err = err + dx; y0 = y0 + sy; }
+        }
+    }
+    return 0;
+}
+
+fn pc_blend255(fb, fw, fh, x, y, col, a) {
+    if x < 0 || y < 0 || x >= fw || y >= fh || a <= 0 { return 0; }
+    let p: int = fb + (y * fw + x) * 4;
+    let d: int = Memory.Read32(p);
+    let ia: int = 255 - a;
+    let r: int = (((col >> 16) & 255) * a + ((d >> 16) & 255) * ia) / 255;
+    let g: int = (((col >> 8) & 255) * a + ((d >> 8) & 255) * ia) / 255;
+    let b: int = ((col & 255) * a + (d & 255) * ia) / 255;
+    Memory.Write32(p, 0xFF000000 | (r << 16) | (g << 8) | b);
+    return 0;
+}
+
+fn pc_blendrr(fb, fw, x, y, col, a) {
+    let p: int = fb + (y * fw + x) * 4;
+    let d: int = Memory.Read32(p);
+    let dr: int = (d >> 16) & 255;
+    let dg: int = (d >> 8) & 255;
+    let db: int = d & 255;
+    let r: int = dr + (((((col >> 16) & 255) - dr) * a + 128) >> 8);
+    let g: int = dg + (((((col >> 8) & 255) - dg) * a + 128) >> 8);
+    let b: int = db + ((((col & 255) - db) * a + 128) >> 8);
+    Memory.Write32(p, 0xFF000000 | (r << 16) | (g << 8) | b);
+    return 0;
+}
+
+fn pc_isqrt(n) {
+    if n <= 0 { return 0; }
+    let x: int = 1;
+    while x * x < n { x = x * 2; }
+    let y: int = (x + n / x) / 2;
+    while y < x { x = y; y = (x + n / x) / 2; }
+    return x;
+}
+
+// Signed-distance rounded box, anti-aliased. x,y,w,h,r,ring in 1/256 px; alpha 0..256.
+fn pc_rr(x, y, w, h, r, col, alpha, ring) {
+    let fb: int = pc_g(2048);
+    if fb == 0 || w <= 0 || h <= 0 || alpha <= 0 { return 0; }
+    let fw: int = pc_g(2056);
+    let fh: int = pc_g(2064);
+    if r > w / 2 { r = w / 2; }
+    if r > h / 2 { r = h / 2; }
+    if r < 0 { r = 0; }
+    let x0: int = (x >> 8) - 1;
+    let y0: int = (y >> 8) - 1;
+    let x1: int = ((x + w + 255) >> 8) + 1;
+    let y1: int = ((y + h + 255) >> 8) + 1;
+    if x0 < 0 { x0 = 0; }
+    if y0 < 0 { y0 = 0; }
+    if x1 > fw { x1 = fw; }
+    if y1 > fh { y1 = fh; }
+    let cx: int = x + w / 2;
+    let cy: int = y + h / 2;
+    let hw: int = w / 2 - r;
+    let hh: int = h / 2 - r;
+    let py: int = y0;
+    while py < y1 {
+        let qy: int = pc_abs(py * 256 + 128 - cy) - hh;
+        let px: int = x0;
+        while px < x1 {
+            let qx: int = pc_abs(px * 256 + 128 - cx) - hw;
+            let d: int = 0;
+            if qx <= 0 && qy <= 0 {
+                if qx > qy { d = qx - r; } else { d = qy - r; }
+            } else {
+                let ax: int = qx;
+                if ax < 0 { ax = 0; }
+                let ay: int = qy;
+                if ay < 0 { ay = 0; }
+                if ay == 0 { d = ax - r; } else {
+                    if ax == 0 { d = ay - r; } else { d = pc_isqrt(ax * ax + ay * ay) - r; }
+                }
+            }
+            let a: int = 0;
+            if ring > 0 { a = 128 - (pc_abs(d + ring / 2) - ring / 2); } else { a = 128 - d; }
+            if a > 0 {
+                if a > 256 { a = 256; }
+                pc_blendrr(fb, fw, px, py, col, (a * alpha) >> 8);
+            }
+            px = px + 1;
+        }
+        py = py + 1;
+    }
+    return 0;
+}
+
+fn pc_shadow(x, y, w, h, r, col, strength) {
+    let i: int = 6;
+    while i >= 1 {
+        pc_rr(x - i * 256, y - i * 256 + 1024, w + 2 * i * 256, h + 2 * i * 256, r + i * 256, col, (strength * (7 - i)) / 36, 0);
+        i = i - 1;
+    }
+    return 0;
+}
+
+fn pc_cov(g, row, col) {
+    let sr: int = row / 2;
+    let sc: int = col / 2;
+    let bit: int = 128 >> sc;
+    if (Memory.Read8(g + sr) & bit) == 0 { return 0; }
+    let edge: int = 0;
+    if row % 2 == 0 && sr > 0 { if (Memory.Read8(g + sr - 1) & bit) == 0 { edge = 1; } }
+    if row % 2 == 1 && sr < 7 { if (Memory.Read8(g + sr + 1) & bit) == 0 { edge = 1; } }
+    if col % 2 == 0 && sc > 0 { if (Memory.Read8(g + sr) & (128 >> (sc - 1))) == 0 { edge = 1; } }
+    if col % 2 == 1 && sc < 7 { if (Memory.Read8(g + sr) & (128 >> (sc + 1))) == 0 { edge = 1; } }
+    if edge == 1 { return 208; }
+    return 255;
+}
+
+fn pc_tw(s, sc) {
+    if s == 0 { return 0; }
+    if sc < 1 { sc = 1; }
+    if sc > 6 { sc = 6; }
+    return pc_strlen(s) * 16 * sc;
+}
+
+fn pc_text(x, y, s, col, sc) {
+    let fb: int = pc_g(2048);
+    if s == 0 || fb == 0 { return 0; }
+    if sc < 1 { sc = 1; }
+    if sc > 6 { sc = 6; }
+    let font: int = pc_font();
+    let fw: int = pc_g(2056);
+    let fh: int = pc_g(2064);
+    let cx: int = x;
+    let i: int = 0;
+    let ch: int = Memory.Read8(s);
+    while ch != 0 {
+        if ch == 10 { cx = x; y = y + 17 * sc; } else {
+            if ch < 32 || ch > 126 { ch = 63; }
+            let g: int = font + (ch - 32) * 8;
+            let r: int = 0;
+            while r < 16 {
+                let c: int = 0;
+                while c < 16 {
+                    let cv: int = pc_cov(g, r, c);
+                    if cv > 0 {
+                        let sy: int = 0;
+                        while sy < sc {
+                            let sx: int = 0;
+                            while sx < sc {
+                                pc_blend255(fb, fw, fh, cx + c * sc + sx, y + r * sc + sy, col, cv);
+                                sx = sx + 1;
+                            }
+                            sy = sy + 1;
+                        }
+                    }
+                    c = c + 1;
+                }
+                r = r + 1;
+            }
+            cx = cx + 16 * sc;
+        }
+        i = i + 1;
+        ch = Memory.Read8(s + i);
+    }
+    return 0;
+}
+
+fn pc_in(px, py, x, y, w, h) {
+    if px >= x && py >= y && px < x + w && py < y + h { return 1; }
+    return 0;
+}
+fn pc_clicked(x, y, w, h) {
+    if pc_g(2104) == 1 && pc_in(pc_g(2112), pc_g(2120), x, y, w, h) == 1 && pc_in(pc_g(2080), pc_g(2088), x, y, w, h) == 1 { return 1; }
+    return 0;
+}
+fn pc_hover(x, y, w, h) { return pc_in(pc_g(2080), pc_g(2088), x, y, w, h); }
+
+fn pc_keypush(k) {
+    let n: int = pc_g(2160);
+    if n < 32 { pc_gs(2168 + n * 8, k); pc_gs(2160, n + 1); }
+    return 0;
+}
+fn pc_keypop() {
+    let n: int = pc_g(2160);
+    if n == 0 { return 0; }
+    let k: int = pc_g(2168);
+    let i: int = 1;
+    while i < n { pc_gs(2168 + (i - 1) * 8, pc_g(2168 + i * 8)); i = i + 1; }
+    pc_gs(2160, n - 1);
+    return k;
+}
+
+// ---------------------------------------------------------------- X11 over a raw unix socket
+
+fn pc_memeq(a, b, n) {
+    let i: int = 0;
+    while i < n { if Memory.Read8(a + i) != Memory.Read8(b + i) { return 0; } i = i + 1; }
+    return 1;
+}
+fn pc_x_u16(b, o) { return Memory.Read8(b + o) + Memory.Read8(b + o + 1) * 256; }
+fn pc_x_u32(b, o) { return Memory.Read16(b + o) + Memory.Read16(b + o + 2) * 65536; }
+fn pc_x_s16(b, o) {
+    let v: int = Memory.Read16(b + o);
+    if v >= 32768 { return v - 65536; }
+    return v;
+}
+fn pc_be16(b, o) { return Memory.Read8(b + o) * 256 + Memory.Read8(b + o + 1); }
+
+fn pc_getenv(name) {
+    let envp: int = pc_g(2488);
+    if envp == 0 { return 0; }
+    let nl: int = pc_strlen(name);
+    let i: int = 0;
+    let res: int = 0;
+    while res == 0 && Memory.Read64(envp + i * 8) != 0 {
+        let e: int = Memory.Read64(envp + i * 8);
+        let ok: int = 1;
+        let k: int = 0;
+        while k < nl { if Memory.Read8(e + k) != Memory.Read8(name + k) { ok = 0; } k = k + 1; }
+        if ok == 1 && Memory.Read8(e + nl) == 61 { res = e + nl + 1; }
+        i = i + 1;
+    }
+    return res;
+}
+
+fn pc_x_read(fd, buf, n) {
+    let got: int = 0;
+    let go: int = 1;
+    while go == 1 && got < n {
+        let r: int = Kernel.Call(0, fd, buf + got, n - got);
+        if r <= 0 { go = 0; } else { got = got + r; }
+    }
+    if got < n { return -1; }
+    return n;
+}
+
+// MIT-MAGIC-COOKIE-1 for display number `dn` from $XAUTHORITY or ~/.Xauthority; returns cookie length or 0.
+fn pc_x_cookie(dn, out) {
+    let path: int = pc_getenv("XAUTHORITY");
+    let tmp: int = Memory.Alloc(512);
+    if path == 0 {
+        let home: int = pc_getenv("HOME");
+        if home == 0 { Memory.Free(tmp); return 0; }
+        let o: int = pc_cat(tmp, 0, home);
+        pc_cat(tmp, o, "/.Xauthority");
+        path = tmp;
+    }
+    let buf: int = Memory.Alloc(65537);
+    let n: int = File.Read(path, buf, 65536);
+    let res: int = 0;
+    let pos: int = 0;
+    while n > 0 && pos + 2 <= n && res == 0 {
+        let fam: int = pc_be16(buf, pos);
+        pos = pos + 2;
+        let al: int = pc_be16(buf, pos);
+        pos = pos + 2 + al;
+        let nl: int = pc_be16(buf, pos);
+        let nump: int = buf + pos + 2;
+        pos = pos + 2 + nl;
+        let ml: int = pc_be16(buf, pos);
+        let namep: int = buf + pos + 2;
+        pos = pos + 2 + ml;
+        let dl: int = pc_be16(buf, pos);
+        let datap: int = buf + pos + 2;
+        pos = pos + 2 + dl;
+        if ml == 18 && dl > 0 && dl <= 64 && (fam == 256 || fam == 65535) && pos <= n {
+            if pc_memeq(namep, "MIT-MAGIC-COOKIE-1", 18) == 1 {
+                let num: int = 0;
+                let k: int = 0;
+                while k < nl { num = num * 10 + Memory.Read8(nump + k) - 48; k = k + 1; }
+                if nl == 0 || num == dn {
+                    let c: int = 0;
+                    while c < dl { Memory.Write8(out + c, Memory.Read8(datap + c)); c = c + 1; }
+                    res = dl;
+                }
+            }
+        }
+    }
+    Memory.Free(buf);
+    Memory.Free(tmp);
+    return res;
+}
+
+fn pc_x_atom(name) {
+    let fd: int = pc_g(2432);
+    let n: int = pc_strlen(name);
+    let pn: int = (n + 3) & -4;
+    let req: int = Memory.Alloc(pn + 16);
+    Memory.Write8(req, 16);
+    Memory.Write16(req + 2, 2 + pn / 4);
+    Memory.Write16(req + 4, n);
+    let i: int = 0;
+    while i < n { Memory.Write8(req + 8 + i, Memory.Read8(name + i)); i = i + 1; }
+    pc_write_all(fd, req, 8 + pn);
+    let rep: int = Memory.Alloc(64);
+    let atom: int = 0;
+    if pc_x_read(fd, rep, 32) == 32 { atom = pc_x_u32(rep, 8); }
+    Memory.Free(rep);
+    Memory.Free(req);
+    return atom;
+}
+
+fn pc_x_open() {
+    let disp: int = pc_getenv("DISPLAY");
+    if disp == 0 { return -1; }
+    let p: int = disp;
+    if Memory.Read8(p) != 58 {
+        if pc_memeq(p, "unix:", 5) == 1 { p = p + 4; } else { return -1; }
+    }
+    p = p + 1;
+    let num: int = 0;
+    while Memory.Read8(p) >= 48 && Memory.Read8(p) <= 57 { num = num * 10 + Memory.Read8(p) - 48; p = p + 1; }
+    let fd: int = Kernel.Call(41, 1, 1, 0);
+    if fd < 0 { return -1; }
+    let sa: int = Memory.Alloc(128);
+    Memory.Write16(sa, 1);
+    let o: int = pc_cat(sa + 2, 0, "/tmp/.X11-unix/X");
+    pc_catn(sa + 2, o, num);
+    if Kernel.Call(42, fd, sa, 110) < 0 { Kernel.Call(3, fd); Memory.Free(sa); return -1; }
+    Memory.Free(sa);
+    let ck: int = Memory.Alloc(128);
+    let cl: int = pc_x_cookie(num, ck);
+    let req: int = Memory.Alloc(256);
+    Memory.Write8(req, 108);
+    Memory.Write16(req + 2, 11);
+    let total: int = 12;
+    if cl > 0 {
+        Memory.Write16(req + 6, 18);
+        Memory.Write16(req + 8, cl);
+        pc_cat(req, 12, "MIT-MAGIC-COOKIE-1");
+        let c: int = 0;
+        while c < cl { Memory.Write8(req + 32 + c, Memory.Read8(ck + c)); c = c + 1; }
+        total = 32 + ((cl + 3) & -4);
+    }
+    pc_write_all(fd, req, total);
+    Memory.Free(req);
+    Memory.Free(ck);
+    let hdr: int = Memory.Alloc(16);
+    if pc_x_read(fd, hdr, 8) < 0 { Kernel.Call(3, fd); return -1; }
+    if Memory.Read8(hdr) != 1 { Kernel.Call(3, fd); return -1; }
+    let add: int = pc_x_u16(hdr, 6) * 4;
+    let st: int = Memory.Alloc(add + 16);
+    Memory.Write64(st, Memory.Read64(hdr));
+    if pc_x_read(fd, st + 8, add) < 0 { Kernel.Call(3, fd); return -1; }
+    let vlen: int = pc_x_u16(st, 24);
+    let nfmt: int = Memory.Read8(st + 29);
+    let scr: int = 40 + ((vlen + 3) & -4) + 8 * nfmt;
+    pc_gs(2432, fd);
+    pc_gs(2456, pc_x_u32(st, scr));
+    pc_gs(2464, pc_x_u32(st, 12));
+    pc_gs(2472, Memory.Read8(st + scr + 38));
+    pc_gs(2504, pc_x_u16(st, 26) * 4);
+    pc_gs(2536, Memory.Read8(st + 34));
+    let minkc: int = Memory.Read8(st + 34);
+    let maxkc: int = Memory.Read8(st + 35);
+    Memory.Free(st);
+    Memory.Free(hdr);
+    // keyboard map
+    let kr: int = Memory.Alloc(16);
+    Memory.Write8(kr, 101);
+    Memory.Write16(kr + 2, 2);
+    Memory.Write8(kr + 4, minkc);
+    Memory.Write8(kr + 5, maxkc - minkc + 1);
+    pc_write_all(fd, kr, 8);
+    let kh: int = Memory.Alloc(64);
+    if pc_x_read(fd, kh, 32) == 32 {
+        let kw: int = pc_x_u32(kh, 4) * 4;
+        let km: int = Memory.Alloc(kw + 8);
+        pc_x_read(fd, km, kw);
+        pc_gs(2520, km);
+        pc_gs(2528, Memory.Read8(kh + 1));
+    }
+    Memory.Free(kh);
+    Memory.Free(kr);
+    return 0;
+}
+
+fn pc_x_present() {
+    let fd: int = pc_g(2432);
+    let fb: int = pc_g(2048);
+    if fd == 0 || fb == 0 || pc_g(2152) == 0 { return 0; }
+    let w: int = pc_g(2056);
+    let h: int = pc_g(2064);
+    let rows: int = (pc_g(2504) - 24) / (w * 4);
+    if rows < 1 { rows = 1; }
+    let hdr: int = Rt.Global() + 3100;
+    let y: int = 0;
+    while y < h {
+        let n: int = rows;
+        if y + n > h { n = h - y; }
+        Memory.Write8(hdr, 72);
+        Memory.Write8(hdr + 1, 2);
+        Memory.Write16(hdr + 2, 6 + n * w);
+        Memory.Write32(hdr + 4, pc_g(2440));
+        Memory.Write32(hdr + 8, pc_g(2448));
+        Memory.Write16(hdr + 12, w);
+        Memory.Write16(hdr + 14, n);
+        Memory.Write16(hdr + 16, 0);
+        Memory.Write16(hdr + 18, y);
+        Memory.Write8(hdr + 20, 0);
+        Memory.Write8(hdr + 21, pc_g(2472));
+        Memory.Write16(hdr + 22, 0);
+        pc_write_all(fd, hdr, 24);
+        pc_write_all(fd, fb + y * w * 4, n * w * 4);
+        y = y + n;
+    }
+    return 0;
+}
+
+fn pc_x_keysym(kc, idx) {
+    let km: int = pc_g(2520);
+    let kpc: int = pc_g(2528);
+    let minkc: int = pc_g(2536);
+    if km == 0 || kc < minkc || kpc == 0 { return 0; }
+    if idx >= kpc { idx = 0; }
+    return Memory.Read32(km + ((kc - minkc) * kpc + idx) * 4);
+}
+
+fn pc_x_code(ks) {
+    if ks == 65361 { return 1000; }
+    if ks == 65363 { return 1001; }
+    if ks == 65362 { return 1002; }
+    if ks == 65364 { return 1003; }
+    if ks == 65288 { return 8; }
+    if ks == 65293 || ks == 65421 { return 13; }
+    if ks == 65289 { return 9; }
+    if ks == 65307 { return 27; }
+    if ks == 65535 { return 127; }
+    if ks >= 32 && ks < 127 { return ks; }
+    return 0;
+}
+
+fn pc_x_events() {
+    let fd: int = pc_g(2432);
+    if fd == 0 { return 0; }
+    let ev: int = Rt.Global() + 3000;
+    let go: int = 1;
+    while go == 1 {
+        if pc_poll_in(fd, 0) <= 0 { go = 0; } else {
+            if pc_x_read(fd, ev, 32) < 0 { go = 0; pc_gs(2152, 0); pc_gs(2144, 1); } else {
+                let t: int = Memory.Read8(ev) & 127;
+                if t == 6 { pc_gs(2080, pc_x_s16(ev, 24)); pc_gs(2088, pc_x_s16(ev, 26)); }
+                if t == 4 && Memory.Read8(ev + 1) == 1 {
+                    pc_gs(2096, 1);
+                    pc_gs(2080, pc_x_s16(ev, 24)); pc_gs(2112, pc_x_s16(ev, 24));
+                    pc_gs(2088, pc_x_s16(ev, 26)); pc_gs(2120, pc_x_s16(ev, 26));
+                }
+                if t == 5 && Memory.Read8(ev + 1) == 1 {
+                    pc_gs(2096, 0); pc_gs(2104, 1);
+                    pc_gs(2080, pc_x_s16(ev, 24)); pc_gs(2088, pc_x_s16(ev, 26));
+                }
+                if t == 2 {
+                    let kc: int = Memory.Read8(ev + 1);
+                    let state: int = pc_x_u16(ev, 28);
+                    let k0: int = pc_x_keysym(kc, 0);
+                    let k1: int = k0;
+                    if (state & 1) == 1 { k1 = pc_x_keysym(kc, 1); if k1 == 0 { k1 = k0; } }
+                    if (state & 2) == 2 && k1 >= 97 && k1 <= 122 { k1 = k1 - 32; }
+                    let c0: int = pc_x_code(k0);
+                    let c1: int = pc_x_code(k1);
+                    if c0 != 0 || c1 != 0 { pc_keypush(c1 + c0 * 65536); }
+                }
+                if t == 12 { pc_x_present(); }
+                if t == 17 || t == 33 { pc_gs(2152, 0); pc_gs(2144, 1); }
+            }
+        }
+    }
+    return 0;
+}
+
+fn pc_win_create(w, h, title) {
+    if w < 64 { w = 800; }
+    if h < 64 { h = 500; }
+    if title == 0 { title = "Purplecode"; }
+    if pc_x_open() < 0 {
+        let msg = "[GUI] No display backend reachable (DISPLAY unset or X server unavailable)\n";
+        pc_write_all(2, msg, pc_strlen(msg));
+        return -1;
+    }
+    pc_fb_ensure(w, h);
+    pc_clear(0xFF111111);
+    let fd: int = pc_g(2432);
+    let base: int = pc_g(2464);
+    let win: int = base + 1;
+    let gc: int = base + 2;
+    pc_gs(2440, win);
+    pc_gs(2448, gc);
+    let a_proto: int = pc_x_atom("WM_PROTOCOLS");
+    let a_del: int = pc_x_atom("WM_DELETE_WINDOW");
+    pc_gs(2512, a_del);
+    let r: int = Memory.Alloc(128);
+    // CreateWindow with BackPixel + EventMask
+    Memory.Write8(r, 1);
+    Memory.Write16(r + 2, 10);
+    Memory.Write32(r + 4, win);
+    Memory.Write32(r + 8, pc_g(2456));
+    Memory.Write16(r + 12, 80);
+    Memory.Write16(r + 14, 60);
+    Memory.Write16(r + 16, w);
+    Memory.Write16(r + 18, h);
+    Memory.Write16(r + 22, 1);
+    Memory.Write32(r + 28, 2 + 2048);
+    Memory.Write32(r + 32, 0);
+    Memory.Write32(r + 36, 163919);
+    pc_write_all(fd, r, 40);
+    // WM_NAME
+    let tn: int = pc_strlen(title);
+    let tp: int = (tn + 3) & -4;
+    let tr: int = Memory.Alloc(tp + 32);
+    Memory.Write8(tr, 18);
+    Memory.Write16(tr + 2, 6 + tp / 4);
+    Memory.Write32(tr + 4, win);
+    Memory.Write32(tr + 8, 39);
+    Memory.Write32(tr + 12, 31);
+    Memory.Write8(tr + 16, 8);
+    Memory.Write32(tr + 20, tn);
+    let i: int = 0;
+    while i < tn { Memory.Write8(tr + 24 + i, Memory.Read8(title + i)); i = i + 1; }
+    pc_write_all(fd, tr, 24 + tp);
+    Memory.Free(tr);
+    // WM_PROTOCOLS = [WM_DELETE_WINDOW]
+    let z: int = 0;
+    while z < 32 { Memory.Write8(r + z, 0); z = z + 1; }
+    Memory.Write8(r, 18);
+    Memory.Write16(r + 2, 7);
+    Memory.Write32(r + 4, win);
+    Memory.Write32(r + 8, a_proto);
+    Memory.Write32(r + 12, 4);
+    Memory.Write8(r + 16, 32);
+    Memory.Write32(r + 20, 1);
+    Memory.Write32(r + 24, a_del);
+    pc_write_all(fd, r, 28);
+    // CreateGC
+    z = 0;
+    while z < 16 { Memory.Write8(r + z, 0); z = z + 1; }
+    Memory.Write8(r, 55);
+    Memory.Write16(r + 2, 4);
+    Memory.Write32(r + 4, gc);
+    Memory.Write32(r + 8, win);
+    pc_write_all(fd, r, 16);
+    // MapWindow
+    z = 0;
+    while z < 8 { Memory.Write8(r + z, 0); z = z + 1; }
+    Memory.Write8(r, 8);
+    Memory.Write16(r + 2, 2);
+    Memory.Write32(r + 4, win);
+    pc_write_all(fd, r, 8);
+    Memory.Free(r);
+    pc_gs(2152, 1);
+    pc_gs(2144, 0);
+    pc_gs(2560, 0);
+    pc_x_present();
+    return 1;
+}
+
+// ---------------------------------------------------------------- Blow.*
+
+fn Blow.Window(w, h, title) {
+    pc_gs(2144, 0);
+    pc_gs(2128, 0);
+    pc_gs(2136, 0);
+    if title == 0 { title = "BlowUI"; }
+    return pc_win_create(w, h, title);
+}
+
+fn Blow.Headless(w, h) {
+    pc_fb_ensure(w, h);
+    pc_gs(2152, 0);
+    return 0;
+}
+
+fn Blow.Theme(n) {
+    if n < 0 || n > 2 { n = 0; }
+    pc_gs(2072, n);
+    return n;
+}
+
+fn Blow.Poll() {
+    if pc_g(2432) != 0 {
+        pc_gs(2104, 0);
+        pc_x_events();
+    }
+    if pc_g(2144) == 1 { return -1; }
+    return 0;
+}
+
+fn Blow.Begin(bg) {
+    if bg != 0 { pc_clear(bg | 0xFF000000); } else { pc_clear(pc_bt(0) | 0xFF000000); }
+    return 0;
+}
+
+fn pc_sleep_ms(ms) {
+    let ts: int = Rt.Global() + 3200;
+    Memory.Write64(ts, ms / 1000);
+    Memory.Write64(ts + 8, (ms % 1000) * 1000000);
+    return Kernel.Call(35, ts, 0);
+}
+
+fn Blow.End() {
+    if pc_g(2152) == 1 { pc_x_present(); pc_sleep_ms(12); }
+    if pc_g(2104) == 1 { pc_gs(2128, 0); }
+    pc_gs(2104, 0);
+    return 0;
+}
+
+fn Blow.MouseX() { return pc_g(2080); }
+fn Blow.MouseY() { return pc_g(2088); }
+fn Blow.MouseDown() { return pc_g(2096); }
+fn Blow.Key() { return pc_keypop() & 65535; }
+
+fn Blow.Millis() {
+    let ts: int = Rt.Global() + 3216;
+    Kernel.Call(228, 1, ts);
+    return Memory.Read64(ts) * 1000 + Memory.Read64(ts + 8) / 1000000;
+}
+
+fn Blow.SimClick(x, y) {
+    pc_gs(2080, x); pc_gs(2112, x);
+    pc_gs(2088, y); pc_gs(2120, y);
+    pc_gs(2104, 1);
+    return 0;
+}
+
+fn Blow.Screenshot(path) {
+    let fb: int = pc_g(2048);
+    if fb == 0 || path == 0 { return -1; }
+    let fd: int = Kernel.Call(2, path, 577, 420);
+    if fd < 0 { return -1; }
+    let w: int = pc_g(2056);
+    let h: int = pc_g(2064);
+    let hd: int = Memory.Alloc(64);
+    let o: int = pc_cat(hd, 0, "P6\n");
+    o = pc_catn(hd, o, w);
+    o = pc_cat(hd, o, " ");
+    o = pc_catn(hd, o, h);
+    o = pc_cat(hd, o, "\n255\n");
+    pc_write_all(fd, hd, o);
+    Memory.Free(hd);
+    let rowb: int = Memory.Alloc(w * 3 + 8);
+    let y: int = 0;
+    while y < h {
+        let x: int = 0;
+        while x < w {
+            let p: int = Memory.Read32(fb + (y * w + x) * 4);
+            Memory.Write8(rowb + x * 3, (p >> 16) & 255);
+            Memory.Write8(rowb + x * 3 + 1, (p >> 8) & 255);
+            Memory.Write8(rowb + x * 3 + 2, p & 255);
+            x = x + 1;
+        }
+        pc_write_all(fd, rowb, w * 3);
+        y = y + 1;
+    }
+    Memory.Free(rowb);
+    Kernel.Call(3, fd);
+    return 0;
+}
+
+fn Blow.RRect(x, y, w, h, r, color) { return pc_rr(x * 256, y * 256, w * 256, h * 256, r * 256, color, 256, 0); }
+fn Blow.Circle(x, y, r, color) { return pc_rr((x - r) * 256, (y - r) * 256, 2 * r * 256, 2 * r * 256, r * 256, color, 256, 0); }
+fn Blow.Divider(x, y, w) { return pc_fill(x, y, w, 1, pc_bt(3)); }
+fn Blow.Label(x, y, t, sc) { pc_text(x, y, t, pc_bt(4), sc); return pc_tw(t, sc); }
+fn Blow.Muted(x, y, t, sc) { pc_text(x, y, t, pc_bt(5), sc); return pc_tw(t, sc); }
+fn Blow.TextWidth(t, sc) { return pc_tw(t, sc); }
+
+fn Blow.LabelInt(x, y, v, sc) {
+    let b: int = Rt.Global() + 3232;
+    pc_catn(b, 0, v);
+    pc_text(x, y, b, pc_bt(4), sc);
+    return 0;
+}
+
+fn Blow.Font(name) {
+    if name == 0 { return -1; }
+    if pc_strcmp(name, "Builtin Emergency Font") == 0 { return 0; }
+    return -1;
+}
+
+fn pc_has_style(style, wanted) {
+    if style == 0 { return 0; }
+    let wl: int = pc_strlen(wanted);
+    let p: int = 0;
+    let found: int = 0;
+    while Memory.Read8(style + p) != 0 && found == 0 {
+        while Memory.Read8(style + p) == 32 || Memory.Read8(style + p) == 9 || Memory.Read8(style + p) == 44 { p = p + 1; }
+        if Memory.Read8(style + p) == 33 { p = p + 1; }
+        let a: int = p;
+        while Memory.Read8(style + p) != 0 && Memory.Read8(style + p) != 44 { p = p + 1; }
+        let n: int = p - a;
+        while n > 0 && Memory.Read8(style + a + n - 1) == 32 { n = n - 1; }
+        if n == wl && pc_memeq(style + a, wanted, n) == 1 { found = 1; }
+        if Memory.Read8(style + p) == 44 { p = p + 1; }
+    }
+    return found;
+}
+
+fn Blow.StyledLabel(x, y, t, style, color, sc) {
+    if sc < 1 { sc = 1; }
+    if sc > 6 { sc = 6; }
+    if t == 0 { return 0; }
+    let bold: int = pc_has_style(style, "Bold");
+    let italic: int = pc_has_style(style, "Italic");
+    let under: int = pc_has_style(style, "Underline");
+    let strike: int = pc_has_style(style, "Strikethru");
+    let font: int = pc_font();
+    let ox: int = x;
+    let starty: int = y;
+    let i: int = 0;
+    let ch: int = Memory.Read8(t);
+    while ch != 0 {
+        if ch == 10 { x = ox; y = y + 17 * sc; } else {
+            if ch < 32 || ch > 126 { ch = 63; }
+            let g: int = font + (ch - 32) * 8;
+            let r: int = 0;
+            while r < 16 {
+                let c: int = 0;
+                while c < 16 {
+                    if (Memory.Read8(g + r / 2) & (128 >> (c / 2))) != 0 {
+                        let shear: int = 0;
+                        if italic == 1 { shear = (15 - r) / 5; }
+                        pc_fill(x + c * sc + shear, y + r * sc, sc, sc, color);
+                        if bold == 1 { pc_fill(x + c * sc + shear + sc, y + r * sc, sc, sc, color); }
+                    }
+                    c = c + 1;
+                }
+                r = r + 1;
+            }
+            x = x + (16 + bold) * sc;
+        }
+        i = i + 1;
+        ch = Memory.Read8(t + i);
+    }
+    if under == 1 { pc_fill(ox, starty + 16 * sc, x - ox, sc, color); }
+    if strike == 1 { pc_fill(ox, starty + 8 * sc, x - ox, sc, color); }
+    return pc_tw(t, sc);
+}
+
+fn Blow.Panel(x, y, w, h, r) {
+    let s: int = 141;
+    if pc_g(2072) == 1 { s = 46; }
+    pc_shadow(x * 256, y * 256, w * 256, h * 256, r * 256, 0, s);
+    pc_rr(x * 256, y * 256, w * 256, h * 256, r * 256, pc_bt(1), 256, 0);
+    pc_rr(x * 256, y * 256, w * 256, h * 256, r * 256, pc_bt(3), 256, 256);
+    return 0;
+}
+
+fn Blow.Badge(x, y, t, color) {
+    let w: int = pc_tw(t, 1) + 18;
+    pc_rr(x * 256, y * 256, w * 256, 20 * 256, 10 * 256, color, 56, 0);
+    pc_text(x + 9, y + 6, t, color, 1);
+    return w;
+}
+
+fn Blow.Button(x, y, w, h, label) {
+    let hov: int = pc_hover(x, y, w, h);
+    let prs: int = 0;
+    if pc_g(2096) == 1 && pc_in(pc_g(2112), pc_g(2120), x, y, w, h) == 1 { prs = 1; }
+    let c: int = pc_bt(6);
+    if prs == 1 { c = pc_bt(8); } else { if hov == 1 { c = pc_bt(7); } }
+    let r: int = 14;
+    if h < 40 { r = h / 2; }
+    if prs == 0 { pc_shadow(x * 256, y * 256, w * 256, h * 256, r * 256, c, 82); }
+    pc_rr(x * 256, y * 256, w * 256, h * 256, r * 256, c, 256, 0);
+    pc_rr(x * 256, y * 256, w * 256, h * 256, r * 256, 0xFFFFFF, 46, 256);
+    let sc: int = 1;
+    if h >= 48 { sc = 2; }
+    let tw: int = pc_tw(label, sc);
+    pc_text(x + (w - tw) / 2, y + (h - 8 * sc) / 2 + prs, label, 0xFFFFFF, sc);
+    return pc_clicked(x, y, w, h);
+}
+
+fn Blow.Toggle(x, y, value) {
+    let hov: int = pc_hover(x, y, 44, 24);
+    let col: int = pc_bt(2);
+    if value != 0 { if hov == 1 { col = pc_bt(7); } else { col = pc_bt(6); } }
+    pc_rr(x * 256, y * 256, 44 * 256, 24 * 256, 12 * 256, col, 256, 0);
+    if value == 0 { pc_rr(x * 256, y * 256, 44 * 256, 24 * 256, 12 * 256, pc_bt(3), 256, 256); }
+    let kx: int = x + 2;
+    if value != 0 { kx = x + 22; }
+    pc_rr(kx * 256, y * 256 + 512, 20 * 256, 20 * 256, 10 * 256, 0, 64, 0);
+    pc_rr(kx * 256, y * 256 + 384, 20 * 256, 20 * 256, 10 * 256, 0xFFFFFF, 256, 0);
+    if pc_clicked(x, y, 44, 24) == 1 {
+        if value != 0 { return 0; }
+        return 1;
+    }
+    return value;
+}
+
+fn Blow.Checkbox(x, y, value, label) {
+    let w: int = 30 + pc_tw(label, 1);
+    let hov: int = pc_hover(x, y, w, 22);
+    if value != 0 {
+        let c: int = pc_bt(6);
+        if hov == 1 { c = pc_bt(7); }
+        pc_rr(x * 256, y * 256, 22 * 256, 22 * 256, 7 * 256, c, 256, 0);
+    } else {
+        pc_rr(x * 256, y * 256, 22 * 256, 22 * 256, 7 * 256, pc_bt(2), 256, 0);
+        let rc: int = pc_bt(3);
+        if hov == 1 { rc = pc_bt(6); }
+        pc_rr(x * 256, y * 256, 22 * 256, 22 * 256, 7 * 256, rc, 256, 384);
+    }
+    if value != 0 {
+        let s: int = 0;
+        while s < 2 {
+            let ax: int = 1536;
+            let ay: int = 2944;
+            let bx: int = 2432;
+            let by: int = 3840;
+            if s == 1 { ax = 2432; ay = 3840; bx = 4096; by = 1920; }
+            let i: int = 0;
+            while i <= 12 {
+                let px: int = ax + (bx - ax) * i / 12;
+                let py: int = ay + (by - ay) * i / 12;
+                pc_rr(x * 256 + px - 410, y * 256 + py - 410, 819, 819, 410, 0xFFFFFF, 256, 0);
+                i = i + 1;
+            }
+            s = s + 1;
+        }
+    }
+    pc_text(x + 30, y + 7, label, pc_bt(4), 1);
+    if pc_clicked(x, y, w, 22) == 1 {
+        if value != 0 { return 0; }
+        return 1;
+    }
+    return value;
+}
+
+fn Blow.Slider(id, x, y, w, value, max) {
+    if max < 1 { max = 1; }
+    if value < 0 { value = 0; }
+    if value > max { value = max; }
+    let ax: int = x - 10;
+    let ay: int = y - 12;
+    let aw: int = w + 20;
+    let ah: int = 30;
+    if pc_g(2096) == 1 && pc_g(2128) == 0 && pc_in(pc_g(2112), pc_g(2120), ax, ay, aw, ah) == 1 { pc_gs(2128, id); }
+    if pc_g(2128) == id && pc_g(2096) == 1 {
+        let dv: int = w;
+        if dv == 0 { dv = 1; }
+        let v: int = (pc_g(2080) - x) * max / dv;
+        if v < 0 { v = 0; }
+        if v > max { v = max; }
+        value = v;
+    }
+    let kx: int = x * 256 + (w * 256 * value) / max;
+    let hot: int = 0;
+    if pc_g(2128) == id || pc_hover(ax, ay, aw, ah) == 1 { hot = 1; }
+    pc_rr(x * 256, y * 256 - 768, w * 256, 6 * 256, 3 * 256, pc_bt(2), 256, 0);
+    pc_rr(x * 256, y * 256 - 768, kx - x * 256 + 256, 6 * 256, 3 * 256, pc_bt(6), 256, 0);
+    pc_rr(kx - 11 * 256, y * 256 - 9 * 256, 22 * 256, 22 * 256, 11 * 256, 0, 72, 0);
+    let kc: int = pc_bt(6);
+    if hot == 1 { kc = pc_bt(7); }
+    pc_rr(kx - 10 * 256, y * 256 - 10 * 256, 20 * 256, 20 * 256, 10 * 256, kc, 256, 0);
+    pc_rr(kx - 5 * 256, y * 256 - 5 * 256, 10 * 256, 10 * 256, 5 * 256, 0xFFFFFF, 256, 0);
+    return value;
+}
+
+fn Blow.Progress(x, y, w, h, value, max) {
+    if max < 1 { max = 1; }
+    if value < 0 { value = 0; }
+    if value > max { value = max; }
+    pc_rr(x * 256, y * 256, w * 256, h * 256, h * 128, pc_bt(2), 256, 0);
+    if value > 0 { pc_rr(x * 256, y * 256, (w * 256 * value) / max, h * 256, h * 128, pc_bt(6), 256, 0); }
+    return value;
+}
+
+fn Blow.TextBox(id, x, y, w, buf) {
+    let h: int = 38;
+    if pc_clicked(x, y, w, h) == 1 { pc_gs(2136, id); } else {
+        if pc_g(2104) == 1 && pc_g(2136) == id { pc_gs(2136, 0); }
+    }
+    let focused: int = 0;
+    if pc_g(2136) == id { focused = 1; }
+    let enter: int = 0;
+    if focused == 1 && buf != 0 {
+        let n: int = pc_strlen(buf);
+        let k: int = pc_keypop() & 65535;
+        while k != 0 {
+            if k == 8 && n > 0 { n = n - 1; Memory.Write8(buf + n, 0); } else {
+                if k == 13 { enter = 1; } else {
+                    if k >= 32 && k < 127 && n < 255 { Memory.Write8(buf + n, k); Memory.Write8(buf + n + 1, 0); n = n + 1; }
+                }
+            }
+            k = pc_keypop() & 65535;
+        }
+    }
+    pc_rr(x * 256, y * 256, w * 256, h * 256, 12 * 256, pc_bt(2), 256, 0);
+    let bc: int = pc_bt(3);
+    let bw: int = 256;
+    if focused == 1 { bc = pc_bt(6); bw = 512; }
+    pc_rr(x * 256, y * 256, w * 256, h * 256, 12 * 256, bc, 256, bw);
+    let maxc: int = (w - 24) / 16;
+    let s: int = buf;
+    let n2: int = 0;
+    if buf != 0 { n2 = pc_strlen(buf); } else { s = Rt.Global() + 3300; Memory.Write8(s, 0); }
+    if n2 > maxc { s = s + (n2 - maxc); }
+    pc_text(x + 12, y + 11, s, pc_bt(4), 2);
+    if focused == 1 && (Blow.Millis() / 500) % 2 == 0 { pc_fill(x + 12 + pc_tw(s, 2) + 1, y + 9, 2, 20, pc_bt(7)); }
+    return enter;
+}
+
+// ---------------------------------------------------------------- GUI.* / Blit.* (software blitter API)
+
+fn GUI.Window.CreateSized(w, h, title) { return pc_win_create(w, h, title); }
+
+fn GUI.Clear(color) {
+    if color == 0 { color = 0xFF000000; }
+    pc_clear(color);
+    return 1;
+}
+
+fn GUI.Draw.Rect(x, y, w, h, color) { pc_fill(x, y, w, h, color); return 1; }
+fn GUI.Rect(x, y, w, h, color) { pc_fill(x, y, w, h, color); return 1; }
+fn Blit.Fill(x, y, w, h, color) { pc_fill(x, y, w, h, color); return 0; }
+fn Blit.Rect(x, y, w, h, color) { pc_fill(x, y, w, h, color); return 0; }
+fn Blit.Clear(color) { pc_clear(color); return 0; }
+fn GUI.DrawLine(x0, y0, x1, y1, color) { pc_line(x0, y0, x1, y1, color); return 1; }
+fn GUI.Line(x0, y0, x1, y1, color) { pc_line(x0, y0, x1, y1, color); return 1; }
+fn Blit.Line(x0, y0, x1, y1, color) { pc_line(x0, y0, x1, y1, color); return 1; }
+fn GUI.DrawText(x, y, t, color) { pc_text(x, y, t, color, 1); return 0; }
+fn GUI.Text(x, y, t, color) { pc_text(x, y, t, color, 1); return 0; }
+fn GUI.Print(x, y, t, color) { pc_text(x, y, t, color, 1); return 0; }
+fn GUI.Font.Print(x, y, t, color) { pc_text(x, y, t, color, 1); return 0; }
+
+fn GUI.DrawChar(x, y, ch, color) {
+    let b: int = Rt.Global() + 3300;
+    Memory.Write8(b, ch);
+    Memory.Write8(b + 1, 0);
+    pc_text(x, y, b, color, 1);
+    return 0;
+}
+fn GUI.Char(x, y, ch, color) { return GUI.DrawChar(x, y, ch, color); }
+
+fn GUI.Present() { pc_x_present(); return 1; }
+fn GUI.Flush() { pc_x_present(); return 1; }
+fn Blit.Present() { pc_x_present(); return 1; }
+fn GUI.GetWidth() { return pc_g(2056); }
+fn GUI.Width() { return pc_g(2056); }
+fn GUI.GetHeight() { return pc_g(2064); }
+fn GUI.Height() { return pc_g(2064); }
+fn GUI.Font.Width() { return 16; }
+fn GUI.Font.Height() { return 16; }
+
+fn GUI.PollKey() {
+    if pc_g(2432) == 0 { return 0; }
+    pc_x_events();
+    let k: int = pc_keypop();
+    if k != 0 { return (k >> 16) & 65535; }
+    if pc_g(2144) == 1 && pc_g(2560) == 0 { pc_gs(2560, 1); return -1; }
+    return 0;
+}
+fn GUI.Key() { return GUI.PollKey(); }
+
+fn GUI.Pump(ms) {
+    if ms < 0 { ms = 16; }
+    pc_sleep_ms(ms);
+    if pc_g(2432) != 0 {
+        pc_x_events();
+        if pc_g(2152) == 0 { return -1; }
+    }
+    return 1;
+}

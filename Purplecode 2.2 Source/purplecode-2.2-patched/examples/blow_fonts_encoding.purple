@@ -1,0 +1,14 @@
+// Purplecode 2.1: BlowUI font selection, combined text styles and encodings.
+fn main() {
+    Hexify("kebab")
+    Data.ShellPrint($LastHexResult)
+    Base64ify("YES")
+    Data.ShellPrint($LastHexResult)
+    Binarify("OK")
+    Data.ShellPrint($LastHexResult)
+    // Optional font selection when the face is installed or registered.
+    Blow.Font("FantasqueSansM Nerd Font Propo")
+    // Style names may be combined; ! is optional after the first comma.
+    Blow.StyledLabel(12, 12, "BlowUI styled text", "!Bold,!Italic,!Underline,Strikethru", 0xFFFFFF, 1)
+    return 0
+}

@@ -1,0 +1,8 @@
+// Native extension ABI: int64_t function(int64_t a0, ..., int64_t a5)
+// String arguments are passed as pointers cast to int64_t.
+fn main() {
+    Controlang.Native.Register("Demo.Double", "./libpurple_demo.so", "purple_demo_double")
+    let result: int = Demo.Double(21)
+    Data.ShellPrint.Int(result)
+    return 0
+}

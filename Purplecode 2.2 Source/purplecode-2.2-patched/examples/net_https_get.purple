@@ -1,0 +1,5 @@
+// TLS-protected HTTPS GET (port 443, system CA and hostname verification).
+fn main() {
+    Net.HttpsGet("example.com", "/", "-")
+    return 0
+}

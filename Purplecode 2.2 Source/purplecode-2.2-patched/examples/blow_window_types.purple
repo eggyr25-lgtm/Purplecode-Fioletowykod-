@@ -1,0 +1,31 @@
+// Demonstrate normal vs decorationless BlowUI windows.
+// Blow.Window          → normal KDE / desktop window (titlebar + borders + resizable)
+// Blow.Decorationless.Window → borderless / frameless window (still resizable)
+
+fn main() {
+    // Change the next line to Blow.Decorationless.Window(...) to test borderless mode.
+    Blow.Window(640, 420, "BlowUI – normal decorated window")
+
+    let running: int = 1
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+
+        Blow.Begin(0x1a1a2e)
+
+        Blow.Label(24, 24, "Normal window has titlebar + borders", 2)
+        Blow.Label(24, 56, "Drag edges / corners to resize – content stays stable", 1)
+
+        let w = Blow.Width()
+        let h = Blow.Height()
+        Blow.Label(24, 100, "Current size:", 1)
+        // simple size readout
+        Blow.Label(140, 100, "see title / resize handles", 1)
+
+        if Blow.Button(24, 160, 180, 40, "Quit") == 1 {
+            running = 0
+        }
+
+        Blow.End()
+    }
+    return 0
+}

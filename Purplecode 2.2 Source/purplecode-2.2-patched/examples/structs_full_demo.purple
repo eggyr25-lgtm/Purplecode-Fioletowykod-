@@ -1,0 +1,87 @@
+// Purplecode 1.7 – Full struct feature demo
+// Stack structs, heap structs, arrays of structs, and methods.
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+struct Entity {
+    id: int;
+    pos: Point;
+    health: int;
+}
+
+// Method definition (name is Type.method). First parameter is the receiver.
+// Compiler passes address-of for stack structs, pointer value for heap.
+fn Point.sum(self: int, extra: int) {
+    // self is the address/pointer; for a real method body we would
+    // use Memory.Read / raw until typed self field access lands.
+    return extra + 1;
+}
+
+fn main() {
+    Data.ShellPrint("=== Full Structs Demo (1.7) ===");
+
+    // ---- Stack ----
+    let s: Point;
+    s.x = 1;
+    s.y = 2;
+    Data.ShellPrint("Stack Point:");
+    Data.ShellPrint.Int(s.x);
+    Data.ShellPrint.Int(s.y);
+
+    // ---- Method call on stack struct ----
+    let r = s.sum(40);
+    Data.ShellPrint("Method Point.sum returned:");
+    Data.ShellPrint.Int(r);
+
+    // ---- Heap single ----
+    let h = Struct.New(Point);
+    h.x = 10;
+    h.y = 20;
+    Data.ShellPrint("Heap Point:");
+    Data.ShellPrint.Int(h.x);
+    Data.ShellPrint.Int(h.y);
+
+    // Method on heap pointer
+    let r2 = h.sum(99);
+    Data.ShellPrint("Heap method returned:");
+    Data.ShellPrint.Int(r2);
+
+    // ---- Array of structs ----
+    let arr = StructArray.New(Point, 3);
+    let e0 = StructArray.At(arr, 0, Point);
+    e0.x = 100;
+    e0.y = 101;
+    let e1 = StructArray.At(arr, 1, Point);
+    e1.x = 200;
+    e1.y = 201;
+    let e2 = StructArray.At(arr, 2, Point);
+    e2.x = 300;
+    e2.y = 301;
+
+    Data.ShellPrint("Array of Points [0..2].x:");
+    Data.ShellPrint.Int(e0.x);
+    Data.ShellPrint.Int(e1.x);
+    Data.ShellPrint.Int(e2.x);
+
+    // ---- Nested on heap ----
+    let hero = Struct.New(Entity);
+    hero.id = 42;
+    hero.pos.x = 7;
+    hero.pos.y = 8;
+    hero.health = 99;
+    Data.ShellPrint("Hero id / pos.x / health:");
+    Data.ShellPrint.Int(hero.id);
+    Data.ShellPrint.Int(hero.pos.x);
+    Data.ShellPrint.Int(hero.health);
+
+    // Cleanup
+    Struct.Free(h);
+    StructArray.Free(arr);
+    Struct.Free(hero);
+
+    Data.ShellPrint("All struct features working.");
+    return 0;
+}

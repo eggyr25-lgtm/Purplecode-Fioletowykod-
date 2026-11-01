@@ -1,0 +1,121 @@
+PURPLETUTORIAL — Purplecode + Purplebootcode
+===========================================
+
+Purplecode is for userland programs. Purplebootcode (Purplebc) is a separate
+freestanding language profile for kernel/boot code. The syntax looks familiar,
+but its API surface deliberately excludes Linux, libc, files, GUI, network and
+other userland functions.
+
+BUILD
+-----
+  make clean all
+  make test
+  ./purplebc examples/boot_hello.purplebc -o kernel.elf
+  ./purplebc examples/boot_hello.purplebc --format bin -o kernel.bin
+  readelf -h kernel.elf
+  file kernel.bin
+
+ELF output is a freestanding 32-bit i386 kernel image linked at 1 MiB with a
+Multiboot2 header. A Multiboot2-capable bootloader (such as GRUB) is needed to
+enter protected mode and load it. The raw .bin output is the flat image of the
+linked kernel payload; it is not a 512-byte BIOS boot sector and cannot be
+written to sector zero and expected to boot on its own. With the default linker
+script, the entry offset in the flat binary is the ELF entry address minus
+0x100000; a custom loader must also initialize the omitted BSS region.
+
+LANGUAGE
+--------
+  fn main() { ... }                    required entry function
+  let x: int = 123                    32-bit integer local
+  let p: ptr = Memory.Alloc(256)      kernel heap allocation (1 MiB heap)
+  Memory.Write32(p, 0x50555250)
+  let x: int = Memory.Read32(p)
+  Memory.Copy(dst, src, bytes)
+  Memory.Set(dst, 0, bytes)
+  let used: int = Memory.HeapUsed()
+  let free: int = Memory.HeapFree()
+  Memory.Free(p)                     free/coalesce a heap block
+  Screen.Clear()
+  Screen.Write("Hello kernel!\n")    VGA text-mode output
+  Port.Out8(0xE9, 65)                 x86 port I/O
+  let v: int = Port.In8(0x60)
+  Disk.ReadSector(lba, buffer)        ATA PIO 28-bit LBA read (512 bytes)
+  Disk.WriteSector(lba, buffer)       ATA PIO 28-bit LBA write (512 bytes)
+  CD.ReadSector2048(lba, buffer)      ATAPI primary-master read (2048 bytes)
+  ISO9660.FileSize(path)              ISO9660 file size, or -1 on error
+  ISO9660.ReadFile(path, buffer, cap) read file bytes into caller buffer
+  Screen.WriteBuffer(buffer)          write a NUL-terminated buffer to VGA text
+  let cr0: int = CPU.ReadCR0()
+  CPU.WriteCR3(page_directory)
+  CPU.Invlpg(address)
+  CPU.CLI(); CPU.STI(); CPU.Halt()
+  System.Panic("fatal kernel error")
+
+Available low-level built-ins: Memory.Alloc/Free, Memory.Read8/16/32/64,
+Memory.Write8/16/32/64, Memory.Copy/Set/HeapUsed/HeapFree, Port.In8/In16/In32,
+Port.Out8/Out16/Out32, CPU.CLI/STI/Halt/ReadFlags/ReadCR0/WriteCR0/ReadCR3/
+WriteCR3/Invlpg, Screen.Clear/Write/WriteBuffer, Disk.ReadSector/WriteSector,
+CD.ReadSector2048, ISO9660.FileSize/ReadFile and System.Panic. The initial heap is a 1 MiB coalescing allocator. Port I/O, CR0/CR3
+writes, and raw disk writes are privileged and can crash the machine or destroy
+data if used incorrectly. Test in an emulator/VM with a disposable disk image.
+
+USERLAND CHECKING
+-----------------
+  ./purplebc --help
+  ./purplebc --check source.purplebc
+  ./purplesdk check source.purplebc
+  ./purplesdk build source.purplebc -o kernel.elf
+  ./purplesdk bin source.purplebc -o kernel.bin
+
+Calls such as Data.ShellPrint, FS.Read, Web.*, Image.*, GUI.*, Kernel.Call,
+System.Process.*, CD.*, USB.* and Program.ELF64.* are rejected with:
+ERROR: ATTEMPTED TO USE USERLAND FUNCTION IN BOOT CODE
+Offending API: <function name>
+REWRITE IT TO NOT USE USERLAND FUNCTIONS
+
+PURPLE LIBS
+-----------
+A Purple Lib may be imported with #uselib "library.pl". Purplebc expands its
+source body, then applies the same boot-code API checks. Library functions must
+be freestanding and must not depend on Purplecode's userland runtime.
+
+LINKING
+-------
+  purplelinker.ld is the default linker script. Override it with
+  --linker-script path/to/purplelinker.ld. ELF is linked directly as the final
+  output; the compiler does not leave a .s file. Internally, this implementation
+  uses GCC's freestanding native-code backend and GNU ld.
+
+IMAGE / ISO PACKAGING
+--------------------
+  ./tools/purpleimage.py --img system.pbfimg --kernel kernel.elf \
+      --inject config.txt:/etc/purple/config.txt --inject logo.bin:/assets/logo.bin
+
+PBFIMG1 is a custom fixed-size payload container with a manifest, kernel and
+injected files. It is NOT a standard partitioned disk image and is not directly
+BIOS bootable. For a bootable Multiboot2 ISO, install grub-mkrescue and xorriso:
+  ./tools/purpleimage.py --iso system.iso --kernel kernel.elf \
+      --inject config.txt:/boot/config.txt
+
+The ISO uses GRUB's multiboot2 loader to start the ELF kernel. Injected files
+are placed in the ISO filesystem. A read-only ISO9660 primary-volume driver is
+available through ATAPI on the primary-master optical drive. Example:
+  ./purplebc examples/boot_iso_read.purplebc -o kernel.elf
+  ./tools/purpleimage.py --iso system.iso --kernel kernel.elf \
+      --inject config.txt:/BOOT/CONFIG.TXT
+The driver does not yet support Joliet/Rock Ridge, USB optical devices, or general
+block-device discovery.
+
+UEFI ISO packaging (hybrid BIOS/UEFI GRUB image) requires x86_64 EFI GRUB modules:
+  ./tools/purpleimage.py --iso system.iso --uefi --kernel kernel.elf \
+      --inject config.txt:/BOOT/CONFIG.TXT
+This boots via GRUB EFI, not a native `.efi` Purplebc kernel; test the i386 kernel
+with your firmware/emulator before deployment.
+
+PURPLECODE VS PURPLEBC
+----------------------
+Purplecode compiles programs for a hosted OS and provides a runtime. Purplebc
+is freestanding i386 kernel code and uses no libc, Linux syscalls or Purplecode
+runtime. It currently targets Multiboot2 i386 protected-mode kernels, not UEFI
+applications or 16-bit BIOS boot sectors. Use a real emulator/VM to test kernels;
+never experiment with raw disk writes on your everyday system drive.

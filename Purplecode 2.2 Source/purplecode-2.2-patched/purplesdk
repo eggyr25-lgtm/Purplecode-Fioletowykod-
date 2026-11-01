@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""PurpleSDK (System Development Kit) front-end for Purplebootcode tooling."""
+import argparse, subprocess, sys
+from pathlib import Path
+ROOT=Path(__file__).resolve().parent
+BC=ROOT/'purplebc'
+IMAGE=next((p for p in (ROOT/'tools/purpleimage.py', ROOT.parent/'share/purplecode/tools/purpleimage.py', Path.home()/'.local/share/purplecode/tools/purpleimage.py', Path('/usr/local/share/purplecode/tools/purpleimage.py'), Path('/usr/share/purplecode/tools/purpleimage.py')) if p.is_file()), ROOT/'tools/purpleimage.py')
+def run(args): return subprocess.run(args).returncode
+def main():
+    ap=argparse.ArgumentParser(prog='purplesdk',description='PurpleSDK — System Development Kit for Purplebootcode')
+    sub=ap.add_subparsers(dest='command',required=True)
+    c=sub.add_parser('check',help='validate boot-code restrictions and source syntax'); c.add_argument('source')
+    b=sub.add_parser('build',help='compile Purplebc to freestanding ELF'); b.add_argument('source'); b.add_argument('-o','--output',required=True); b.add_argument('--linker-script')
+    raw=sub.add_parser('bin',help='compile Purplebc to flat binary'); raw.add_argument('source'); raw.add_argument('-o','--output',required=True); raw.add_argument('--linker-script')
+    img=sub.add_parser('image',help='package kernel ELF into a PBFIMG1 payload container'); img.add_argument('--img',required=True); img.add_argument('--kernel',required=True); img.add_argument('--size-mib',type=int,default=64); img.add_argument('--inject',action='append',default=[])
+    iso=sub.add_parser('iso',help='build a bootable Multiboot2 ISO using GRUB tools'); iso.add_argument('--iso',required=True); iso.add_argument('--kernel',required=True); iso.add_argument('--uefi',action='store_true',help='require UEFI-capable x86_64 GRUB modules'); iso.add_argument('--inject',action='append',default=[])
+    a=ap.parse_args()
+    if a.command=='check': return run([str(BC),'--check',a.source])
+    if a.command=='build':
+        cmd=[str(BC),a.source,'-o',a.output]
+        if a.linker_script: cmd+=['--linker-script',a.linker_script]
+        return run(cmd)
+    if a.command=='bin':
+        cmd=[str(BC),a.source,'--format','bin','-o',a.output]
+        if a.linker_script: cmd+=['--linker-script',a.linker_script]
+        return run(cmd)
+    if a.command=='image':
+        cmd=[sys.executable,str(IMAGE),'--img',a.img,'--kernel',a.kernel,'--size-mib',str(a.size_mib)]
+        for item in a.inject: cmd+=['--inject',item]
+        return run(cmd)
+    if a.command=='iso':
+        cmd=[sys.executable,str(IMAGE),'--iso',a.iso,'--kernel',a.kernel]
+        if a.uefi: cmd+=['--uefi']
+        for item in a.inject: cmd+=['--inject',item]
+        return run(cmd)
+    return 2
+if __name__=='__main__': sys.exit(main())

@@ -1,0 +1,22 @@
+// Read-only ISO9660 access from an ATAPI optical drive on the primary master.
+fn main() {
+    let size: int = ISO9660.FileSize("/BOOT/CONFIG.TXT")
+    if size < 0 {
+        Screen.Write("ISO9660 mount or file lookup failed.\n")
+        System.Panic("ISO9660 file unavailable")
+    }
+    let buffer: ptr = Memory.Alloc(size + 1)
+    if buffer == 0 {
+        System.Panic("cannot allocate file buffer")
+    }
+    let got: int = ISO9660.ReadFile("/BOOT/CONFIG.TXT", buffer, size)
+    if got != size {
+        System.Panic("short ISO9660 file read")
+    }
+    Memory.Write8(buffer + size, 0)
+    Screen.Write("Read injected ISO file: ")
+    Screen.WriteBuffer(buffer)
+    Memory.Free(buffer)
+    while true { CPU.Halt() }
+    return 0
+}
