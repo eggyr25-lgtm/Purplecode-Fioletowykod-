@@ -1,0 +1,19 @@
+struct Point { x: int; y: int; }
+struct Entity { id: int; pos: Point; name: string; health: int; }
+fn Point.sum(self: int, extra: int) { return extra + 1; }
+
+fn main() {
+    let s: Point;
+    s.x = 1; s.y = 2;
+    Data.ShellPrint.Int(s.x + s.y);
+    let h = Struct.New(Point);
+    h.x = 10; h.y = 20;
+    h.x = h.x + 5;
+    Data.ShellPrint.Int(h.x);
+    let e: Entity;
+    e.id = 7; e.pos.x = 3; e.pos.y = 4; e.name = "knight"; e.health = 99;
+    Data.ShellPrint(e.name);
+    Data.ShellPrint.Int(e.pos.x * e.pos.y + e.id);
+    Data.ShellPrint.Int(h.sum(41));
+    Struct.Free(h);
+}

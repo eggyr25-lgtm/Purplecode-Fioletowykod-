@@ -1,0 +1,21 @@
+// Demonstrates a raw ATA PIO sector read. Requires suitable legacy ATA hardware/emulation.
+fn main() {
+    Screen.Clear()
+    let buffer: ptr = Memory.Alloc(512)
+    if buffer == 0 {
+        System.Panic("cannot allocate sector buffer")
+    }
+    let status: int = Disk.ReadSector(0, buffer)
+    if status == 0 {
+        Screen.Write("Read ATA LBA sector 0.\n")
+    } else {
+        Screen.Write("ATA sector read failed.\n")
+    }
+    while true { CPU.Halt() }
+    return 0
+}
+
+// Compile-time API coverage only: do not call this without a disposable test disk.
+fn Disk.WriteSectorExample(lba, buffer) {
+    return Disk.WriteSector(lba, buffer)
+}

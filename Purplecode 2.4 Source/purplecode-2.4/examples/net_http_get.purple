@@ -1,0 +1,13 @@
+fn main() {
+    let n: int = Net.HttpGet("127.0.0.1", 18081, "/", "/tmp/out.html")
+    let s: int = Net.Status()
+    Data.ShellPrint.Int(n)
+    Data.ShellPrint.Int(s)
+    let p: int = Net.HttpPost("127.0.0.1", 18081, "/x", "body", "/tmp/out2.txt")
+    let s2: int = Net.Status()
+    Data.ShellPrint.Int(s2)
+    let m: int = Net.HttpGet("127.0.0.1", 18081, "/nope.css", "/tmp/out3.txt")
+    let s3: int = Net.Status()
+    Data.ShellPrint.Int(s3)
+    return 0
+}

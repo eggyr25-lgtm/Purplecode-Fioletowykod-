@@ -1,0 +1,33 @@
+// Purplebootcode: no Linux/libc APIs, no userland runtime.
+fn main() {
+    Screen.Clear()
+    Screen.Write("Hello from Purplebootcode!\n")
+    Screen.Write("This code runs in kernel context.\n")
+    let heap: ptr = Memory.Alloc(128)
+    if heap == 0 {
+        System.Panic("out of kernel heap")
+    }
+    Memory.Write32(heap, 0x50555250)
+    let magic: int = Memory.Read32(heap)
+    if magic == 0x50555250 {
+        Screen.Write("Memory read/write passed.\n")
+    }
+    Memory.Free(heap)
+    let free_bytes: int = Memory.HeapFree()
+    while true {
+        CPU.Halt()
+    }
+    return 0
+}
+
+// Compile-time coverage for low-level helpers; this function is not called by the sample.
+fn Kernel.LowLevelProbe(address, value) {
+    Memory.Write8(address, value)
+    Memory.Set(address, 0, 8)
+    let flags: int = CPU.ReadFlags()
+    let cr0: int = CPU.ReadCR0()
+    let cr3: int = CPU.ReadCR3()
+    CPU.Invlpg(address)
+    Port.Out32(0xE9, value)
+    return Memory.HeapFree()
+}

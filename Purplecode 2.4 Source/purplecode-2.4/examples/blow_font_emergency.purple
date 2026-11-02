@@ -1,0 +1,26 @@
+// BlowUI font demo — Builtin Emergency Font (always available, no FreeType)
+fn main() {
+    Blow.Window(720, 420, "BlowUI — Emergency Font")
+    Blow.Font("Builtin Emergency Font")
+    let running: int = 1
+    let scale: int = 2
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+        Blow.Begin(0)
+        Blow.Panel(20, 20, 680, 380, 16)
+        Blow.Label(40, 40, "Builtin Emergency Font", 3)
+        Blow.Muted(40, 90, "Soft 16x16 bitmap over 8x8 glyphs. No FreeType required.", 1)
+        Blow.Divider(40, 120, 640)
+        Blow.Label(40, 150, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", scale)
+        Blow.Label(40, 190, "abcdefghijklmnopqrstuvwxyz", scale)
+        Blow.Label(40, 230, "0123456789 !@#$%^&*()_+-=", scale)
+        Blow.Label(40, 270, "The quick brown fox jumps over the lazy dog.", scale)
+        Blow.Muted(40, 320, "Window auto-resizes with the WM. Esc / Quit to exit.", 1)
+        Blow.LabelInt(40, 350, Blow.Width(), 1)
+        Blow.Muted(120, 350, "x", 1)
+        Blow.LabelInt(150, 350, Blow.Height(), 1)
+        if Blow.Button(520, 340, 140, 40, "Quit") == 1 { running = 0 }
+        Blow.End()
+    }
+    return 0
+}

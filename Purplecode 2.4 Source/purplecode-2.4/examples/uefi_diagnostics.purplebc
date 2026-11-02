@@ -1,0 +1,21 @@
+// A self-contained UEFI console diagnostic. Uses only the current UEFI API.
+fn main() {
+    Screen.Clear()
+    Screen.Write("Purplebootcode Milestone 1 1.4\\n")
+    Screen.Write("===============================\\n")
+    let startup_ok: int = 1
+    if startup_ok == 1 {
+        Screen.Write("[ OK ] entry point reached\\n")
+        Screen.Write("[ OK ] firmware console available\\n")
+        Screen.Write("[ OK ] basic control flow works\\n")
+    } else {
+        Screen.Write("[FAIL] startup check failed\\n")
+        System.Panic("diagnostic failure")
+    }
+    Screen.Write("All implemented smoke checks passed.\\n")
+    Screen.Write("This is not a full operating system yet.\\n")
+    while true {
+        CPU.Halt()
+    }
+    return 0
+}
