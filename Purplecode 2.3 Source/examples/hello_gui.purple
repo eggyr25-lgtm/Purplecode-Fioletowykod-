@@ -1,0 +1,50 @@
+// Purplecode 1.8 – polished hierarchical GUI demo
+// Software blitter + present loop. Same look, cleaner API.
+
+fn main() {
+    Data.ShellPrint("Purplecode 1.8 GUI")
+
+    GUI.Window.CreateSized(640, 400, "Purplecode 1.8")
+    GUI.Clear(0xFF111122)
+
+    // Title and accent bars
+    GUI.DrawText(24, 24, "Hello from Purplecode", 0x00FFAA)
+    GUI.DrawText(24, 48, "Software blitter + hierarchical GUI", 0xCCCCFF)
+
+    GUI.Draw.Rect(24, 90, 200, 48, 0x228B22)
+    GUI.Draw.Rect(240, 90, 140, 48, 0x4169E1)
+    GUI.Draw.Rect(400, 90, 90, 90, 0xDC143C)
+
+    // Lines
+    GUI.DrawLine(24, 220, 600, 220, 0x555577)
+    GUI.DrawLine(24, 220, 24, 340, 0x555577)
+    GUI.DrawText(32, 240, "Esc or close window to exit", 0xAAAAAA)
+
+    GUI.Present()
+
+    let running: int = 1
+    let frames: int = 0
+    while running == 1 {
+        let k: int = GUI.PollKey()
+        if k == 27 {
+            running = 0
+        }
+        if k == -1 {
+            running = 0
+        }
+
+        // simple animated bar
+        GUI.Draw.Rect(24, 300, frames, 10, 0xFFAA00)
+        GUI.Present()
+        GUI.Pump(16)
+
+        frames = frames + 2
+        if frames > 560 {
+            frames = 0
+            GUI.Draw.Rect(24, 300, 560, 10, 0xFF111122)
+        }
+    }
+
+    Data.ShellPrint("done")
+    return 0
+}

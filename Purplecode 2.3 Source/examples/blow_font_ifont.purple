@@ -1,0 +1,55 @@
+// BlowUI font demo — Blow.IFont runtime registration (deep embedding path)
+// Registers a tiny synthetic "Raw" blob name so the memory-face path is exercised.
+// For a real TTF/OTF, pass Base64/Hex/Raw bytes of the font file via IFont.
+//
+// Priority order in the runtime:
+//   1. Compile-time PURPLE_EMBEDDED_FONT_* blob
+//   2. Blow.IFont / IFont memory faces  (this demo)
+//   3. System path search
+//   4. Builtin Emergency Font
+
+fn main() {
+    Blow.Window(800, 480, "BlowUI — IFont memory face")
+
+    // Register under a custom name. Encoding "Raw" with empty/short data will
+    // fail FreeType load and fall back — still proves the registration API.
+    // Replace the data string with real Base64/Hex of a TTF for a live scalable face.
+    let reg: int = Blow.IFont("Demo Embedded Face", "AA==", "Base64")
+    let fid: int = Blow.Font("Demo Embedded Face")
+    let running: int = 1
+
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+        Blow.Begin(0)
+        Blow.Panel(20, 20, 760, 440, 16)
+        Blow.Label(40, 40, "Blow.IFont — deep embedding API", 3)
+        Blow.Muted(40, 90, "Registers font bytes in process memory; FT_New_Memory_Face when valid.", 1)
+        Blow.Divider(40, 130, 720)
+
+        Blow.Label(40, 160, "Registration result id", 1)
+        Blow.LabelInt(280, 160, reg, 2)
+        Blow.Label(40, 200, "Select result id", 1)
+        Blow.LabelInt(280, 200, fid, 2)
+
+        if fid < 0 {
+            Blow.Muted(40, 250, "Sample payload is not a real TTF — FreeType rejected it.", 1)
+            Blow.Muted(40, 274, "Emergency bitmap is active. Pass real font bytes for scalable text.", 1)
+            Blow.Label(40, 320, "Example:", 1)
+            Blow.Muted(40, 348, "Blow.IFont(\"MyFace\", base64_of_ttf, \"Base64\")", 1)
+            Blow.Muted(40, 372, "Blow.Font(\"MyFace\")", 1)
+        }
+        if fid >= 0 {
+            Blow.Label(40, 250, "Memory face is active.", 2)
+            Blow.Label(40, 300, "ABCDEFGHIJKLMNOPQRSTUVWXYZ  0123456789", 2)
+            Blow.Label(40, 350, "The quick brown fox jumps over the lazy dog.", 2)
+        }
+
+        Blow.Muted(40, 410, "Size", 1)
+        Blow.LabelInt(100, 410, Blow.Width(), 1)
+        Blow.Muted(180, 410, "x", 1)
+        Blow.LabelInt(210, 410, Blow.Height(), 1)
+        if Blow.Button(600, 400, 140, 40, "Quit") == 1 { running = 0 }
+        Blow.End()
+    }
+    return 0
+}

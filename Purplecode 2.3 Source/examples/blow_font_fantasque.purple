@@ -1,0 +1,34 @@
+// BlowUI font demo — FantasqueSansM Nerd Font Propo (preferred scalable face)
+// Requires FreeType + the font installed (or deep-embedded via PURPLE_EMBEDDED_FONT_*).
+fn main() {
+    Blow.Window(780, 460, "BlowUI — FantasqueSansM")
+    let fid: int = Blow.Font("FantasqueSansM Nerd Font Propo")
+    let running: int = 1
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+        Blow.Begin(0)
+        Blow.Panel(20, 20, 740, 420, 16)
+        Blow.Label(40, 40, "FantasqueSansM Nerd Font Propo", 3)
+        if fid < 0 {
+            Blow.Muted(40, 90, "Face not found — fell back to Builtin Emergency Font.", 1)
+            Blow.Muted(40, 110, "Install the TTF or embed with PURPLE_EMBEDDED_FONT_DATA.", 1)
+        }
+        if fid >= 0 {
+            Blow.Muted(40, 90, "Scalable FreeType face (system path or embedded blob).", 1)
+        }
+        Blow.Divider(40, 140, 700)
+        Blow.Label(40, 170, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 2)
+        Blow.Label(40, 210, "abcdefghijklmnopqrstuvwxyz", 2)
+        Blow.Label(40, 250, "0123456789  { } [ ] < > | \\ / ?", 2)
+        Blow.Label(40, 300, "The quick brown fox jumps over the lazy dog.", 2)
+        Blow.StyledLabel(40, 350, "Bold", "!Bold", 0xE879F9, 2)
+        Blow.StyledLabel(140, 350, "Italic", "!Italic", 0x67E8F9, 2)
+        Blow.Muted(40, 390, "Size", 1)
+        Blow.LabelInt(100, 390, Blow.Width(), 1)
+        Blow.Muted(180, 390, "x", 1)
+        Blow.LabelInt(210, 390, Blow.Height(), 1)
+        if Blow.Button(580, 380, 140, 40, "Quit") == 1 { running = 0 }
+        Blow.End()
+    }
+    return 0
+}

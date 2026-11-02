@@ -1,0 +1,27 @@
+// Purplecode Milestone 1 1.6 full demo
+fn main() {
+    Data.ShellPrint("=== Purplecode Milestone 1 1.6 Full Demo ===")
+
+    // Classic FS write
+    FS.Data.Write "Kebab is delicious" > "/tmp/purple_kebab.txt"
+    Data.ShellPrint("Wrote kebab file")
+
+    // Print hex addresses
+    Data.ShellPrint($100H)
+    Data.ShellPrint($DEADBEEFH)
+
+    // LinuxAPI.Call
+    LinuxAPI.Call(39)
+    LinuxAPI.Call($27H)
+
+    // PurpleAPI convenience
+    PurpleAPI.Call(10)          // create window
+    // PurpleAPI.Call($1H)     // drawRect (only works after window exists)
+
+    // Program.ELF64.Open
+    Program.ELF64.Open("/bin/ls")
+    Program.ELF64.Open("/bin/sh")
+
+    Data.ShellPrint("Demo finished – Hell yeah!")
+    return 0
+}

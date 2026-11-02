@@ -1,0 +1,23 @@
+fn main() {
+    let buf: int = System.Memory.Alloc(600)
+    let nm: int = System.Memory.Alloc(64)
+    File.Mkdir("/tmp/pc_t")
+    File.Write("/tmp/pc_t/a.txt", "hello files")
+    File.Append("/tmp/pc_t/a.txt", " + more")
+    File.Copy("/tmp/pc_t/a.txt", "/tmp/pc_t/b.txt")
+    let n: int = File.Read("/tmp/pc_t/a.txt", buf, 500)
+    Data.ShellPrint.Int(n)
+    Net.Print(buf)
+    Data.ShellPrint("<- read")
+    let c: int = File.Count("/tmp/pc_t")
+    Data.ShellPrint.Int(c)
+    File.Name("/tmp/pc_t", 1, nm, 60)
+    Net.Print(nm)
+    Data.ShellPrint("<- 2nd entry")
+    let sz: int = File.Size("/tmp/pc_t/b.txt")
+    Data.ShellPrint.Int(sz)
+    File.Delete("/tmp/pc_t/b.txt")
+    let ex: int = File.Exists("/tmp/pc_t/b.txt")
+    Data.ShellPrint.Int(ex)
+    return 0
+}

@@ -1,0 +1,10 @@
+fn main() {
+    let buf: int = System.Memory.Alloc(600)
+    let fd: int = Net.Connect("127.0.0.1", 18080)
+    Net.Send(fd, "ping")
+    let n: int = Net.Recv(fd, buf, 500)
+    Net.Print(buf)
+    Data.ShellPrint("<- client got")
+    Net.Close(fd)
+    return 0
+}

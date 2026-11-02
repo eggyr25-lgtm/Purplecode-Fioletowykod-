@@ -1,0 +1,327 @@
+// BlowUI Advanced Demo — multi-view dashboard
+// Showcases: themes, all widgets, fonts/styles, live input, drawing, animation, tabs.
+// Build:  ./purplec examples/blow_advanced.purple -o blow_advanced && ./blow_advanced
+// Needs X11 or Wayland (+ optional FreeType for scalable fonts).
+
+fn main() {
+    Blow.Window(960, 620, "BlowUI Advanced")
+    Blow.Font("FantasqueSansM Nerd Font Propo")
+
+    // --- state ---
+    let running: int = 1
+    let view: int = 0              // 0=dashboard 1=controls 2=canvas 3=about
+    let theme: int = 0
+    let clicks: int = 0
+    let notify: int = 1
+    let dark: int = 1
+    let sound: int = 1
+    let vol: int = 55
+    let brightness: int = 80
+    let progress: int = 0
+    let anim: int = 0
+    let last_ms: int = 0
+    let fps_acc: int = 0
+    let fps: int = 0
+    let name: int = System.Memory.Alloc(256)
+    let logline: int = System.Memory.Alloc(256)
+    let canvas_x: int = 480
+    let canvas_y: int = 320
+    let brush: int = 14
+    let paint_r: int = 111
+    let paint_g: int = 66
+    let paint_b: int = 193
+    let dots: int = 0
+    let key_last: int = 0
+    let shot_count: int = 0
+
+    last_ms = Blow.Millis()
+
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+
+        // --- animation / fps ---
+        let now: int = Blow.Millis()
+        let dt: int = now - last_ms
+        if dt >= 16 {
+            anim = anim + 1
+            if anim > 10000 { anim = 0 }
+            progress = progress + 1
+            if progress > 100 { progress = 0 }
+            fps_acc = fps_acc + 1
+            if dt >= 1000 {
+                fps = fps_acc
+                fps_acc = 0
+                last_ms = now
+            } else {
+                // keep last_ms for sub-second frames so progress animates
+            }
+        }
+
+        // drain key queue (for status + shortcuts)
+        let k: int = Blow.Key()
+        while k != 0 {
+            key_last = k
+            if k == 27 { running = 0 }                    // Esc
+            if k == 49 { view = 0 }                       // 1
+            if k == 50 { view = 1 }                       // 2
+            if k == 51 { view = 2 }                       // 3
+            if k == 52 { view = 3 }                       // 4
+            if k == 116 {                                 // t = cycle theme
+                theme = theme + 1
+                if theme > 2 { theme = 0 }
+                Blow.Theme(theme)
+            }
+            k = Blow.Key()
+        }
+
+        Blow.Begin(0)
+
+        // ========== TOP BAR ==========
+        Blow.Panel(12, 10, 936, 56, 14)
+        Blow.Label(28, 24, "BlowUI Advanced", 2)
+        Blow.Muted(280, 30, "1 Dashboard   2 Controls   3 Canvas   4 About   |  T theme  Esc quit", 1)
+
+        // nav buttons
+        if Blow.Button(620, 18, 78, 36, "Dash") == 1 { view = 0 }
+        if Blow.Button(704, 18, 78, 36, "Ctrl") == 1 { view = 1 }
+        if Blow.Button(788, 18, 78, 36, "Draw") == 1 { view = 2 }
+        if Blow.Button(872, 18, 68, 36, "Info") == 1 { view = 3 }
+
+        // ========== STATUS STRIP ==========
+        Blow.Panel(12, 74, 936, 36, 10)
+        Blow.Muted(24, 84, "mx", 1)
+        Blow.LabelInt(50, 84, Blow.MouseX(), 1)
+        Blow.Muted(110, 84, "my", 1)
+        Blow.LabelInt(136, 84, Blow.MouseY(), 1)
+        Blow.Muted(196, 84, "down", 1)
+        Blow.LabelInt(246, 84, Blow.MouseDown(), 1)
+        Blow.Muted(300, 84, "key", 1)
+        Blow.LabelInt(340, 84, key_last, 1)
+        Blow.Muted(410, 84, "ms", 1)
+        Blow.LabelInt(440, 84, now, 1)
+        Blow.Muted(540, 84, "fps~", 1)
+        Blow.LabelInt(590, 84, fps, 1)
+        Blow.Muted(650, 84, "theme", 1)
+        Blow.LabelInt(720, 84, theme, 1)
+        Blow.Muted(780, 84, "view", 1)
+        Blow.LabelInt(830, 84, view, 1)
+
+        // ========== VIEW 0: DASHBOARD ==========
+        if view == 0 {
+            // left stats
+            Blow.Panel(12, 120, 300, 420, 16)
+            Blow.Label(32, 140, "Overview", 2)
+            Blow.Divider(32, 172, 260)
+
+            Blow.Muted(32, 196, "Session clicks", 1)
+            Blow.LabelInt(32, 220, clicks, 3)
+
+            Blow.Muted(32, 270, "Live progress", 1)
+            Blow.Progress(32, 296, 260, 14, progress, 100)
+            Blow.LabelInt(250, 270, progress, 1)
+
+            Blow.Muted(32, 330, "Volume", 1)
+            Blow.Progress(32, 356, 260, 10, vol, 100)
+
+            Blow.Muted(32, 386, "Brightness", 1)
+            Blow.Progress(32, 412, 260, 10, brightness, 100)
+
+            notify = Blow.Toggle(32, 450, notify)
+            Blow.Label(90, 456, "Notifications", 1)
+            sound = Blow.Toggle(32, 490, sound)
+            Blow.Label(90, 496, "Sound", 1)
+
+            // middle activity
+            Blow.Panel(328, 120, 360, 420, 16)
+            Blow.Label(348, 140, "Activity", 2)
+            Blow.Divider(348, 172, 320)
+
+            Blow.Badge(348, 196, "TCP", 0x34D399)
+            Blow.Badge(410, 196, "UDP", 0x60A5FA)
+            Blow.Badge(472, 196, "HTTP", 0xF59E0B)
+            Blow.Badge(548, 196, "HTTPS", 0xA78BFA)
+            Blow.Badge(630, 196, "Files", 0xF87171)
+
+            Blow.Muted(348, 240, "Quick actions", 1)
+            if Blow.Button(348, 268, 150, 40, "Ping click") == 1 {
+                clicks = clicks + 1
+            }
+            if Blow.Button(514, 268, 150, 40, "Reset") == 1 {
+                clicks = 0
+                progress = 0
+            }
+
+            Blow.Muted(348, 330, "Name buffer (Enter commits)", 1)
+            let sent: int = Blow.TextBox(1, 348, 356, 320, name)
+            if sent == 1 {
+                clicks = clicks + 10
+            }
+
+            Blow.Muted(348, 410, "Styled labels", 1)
+            Blow.StyledLabel(348, 436, "Bold", "!Bold", 0xE879F9, 2)
+            Blow.StyledLabel(420, 436, "Italic", "!Italic", 0x67E8F9, 2)
+            Blow.StyledLabel(520, 436, "Under", "!Underline", 0xFDE68A, 2)
+            Blow.StyledLabel(610, 436, "Strike", "!Strikethru", 0xFCA5A5, 2)
+
+            // right theme + system
+            Blow.Panel(704, 120, 244, 420, 16)
+            Blow.Label(724, 140, "Theme", 2)
+            Blow.Divider(724, 172, 204)
+
+            if Blow.Button(724, 196, 204, 40, "Violet Night") == 1 {
+                theme = 0
+                Blow.Theme(0)
+            }
+            if Blow.Button(724, 248, 204, 40, "Soft Light") == 1 {
+                theme = 1
+                Blow.Theme(1)
+            }
+            if Blow.Button(724, 300, 204, 40, "Midnight Blue") == 1 {
+                theme = 2
+                Blow.Theme(2)
+            }
+
+            Blow.Muted(724, 360, "Screenshot", 1)
+            if Blow.Button(724, 384, 204, 40, "Save PPM") == 1 {
+                Blow.Screenshot("/tmp/blow_advanced.ppm")
+                shot_count = shot_count + 1
+            }
+            Blow.Muted(724, 440, "shots saved", 1)
+            Blow.LabelInt(724, 464, shot_count, 2)
+
+            if Blow.Button(724, 500, 204, 40, "Quit") == 1 {
+                running = 0
+            }
+        }
+
+        // ========== VIEW 1: CONTROLS LAB ==========
+        if view == 1 {
+            Blow.Panel(12, 120, 460, 420, 16)
+            Blow.Label(32, 140, "Widget lab", 2)
+            Blow.Divider(32, 172, 420)
+
+            if Blow.Button(32, 196, 180, 44, "Primary") == 1 { clicks = clicks + 1 }
+            if Blow.Button(230, 196, 180, 44, "Secondary") == 1 { clicks = clicks + 1 }
+
+            notify = Blow.Toggle(32, 260, notify)
+            Blow.Label(90, 266, "Toggle notifications", 1)
+            dark = Blow.Checkbox(32, 304, dark, "Rounded corners")
+            sound = Blow.Checkbox(32, 340, sound, "Enable sound FX")
+
+            Blow.Label(32, 390, "Volume", 1)
+            Blow.LabelInt(400, 390, vol, 1)
+            vol = Blow.Slider(2, 32, 420, 400, vol, 100)
+            Blow.Progress(32, 456, 400, 12, vol, 100)
+
+            Blow.Label(32, 490, "Brightness", 1)
+            Blow.LabelInt(400, 490, brightness, 1)
+            brightness = Blow.Slider(3, 32, 520, 400, brightness, 100)
+
+            Blow.Panel(492, 120, 456, 420, 16)
+            Blow.Label(512, 140, "Primitives", 2)
+            Blow.Divider(512, 172, 416)
+
+            // animated shapes
+            let pulse: int = anim % 40
+            if pulse > 20 { pulse = 40 - pulse }
+            Blow.RRect(520, 200, 180, 100, 18, 0x6D42C1)
+            Blow.RRect(720, 200, 180, 100, 24, 0x2563EB)
+            Blow.Circle(610, 400, 36 + pulse, 0x34D399)
+            Blow.Circle(780, 400, 28 + (20 - pulse), 0xF59E0B)
+
+            Blow.Muted(512, 480, "RRect + Circle (pulse from Millis)", 1)
+            Blow.LabelInt(512, 504, anim, 1)
+        }
+
+        // ========== VIEW 2: CANVAS ==========
+        if view == 2 {
+            Blow.Panel(12, 120, 700, 420, 16)
+            Blow.Label(32, 140, "Paint canvas", 2)
+            Blow.Divider(32, 172, 660)
+
+            // draw area background
+            Blow.RRect(32, 190, 660, 320, 12, 0x0F172A)
+
+            // live cursor follow when mouse over canvas
+            let mx: int = Blow.MouseX()
+            let my: int = Blow.MouseY()
+            if mx > 40 {
+                if mx < 680 {
+                    if my > 200 {
+                        if my < 500 {
+                            canvas_x = mx
+                            canvas_y = my
+                            if Blow.MouseDown() == 1 {
+                                // paint stamp
+                                let col: int = (paint_r * 65536) + (paint_g * 256) + paint_b
+                                Blow.Circle(canvas_x, canvas_y, brush, col)
+                                dots = dots + 1
+                            }
+                        }
+                    }
+                }
+            }
+            // always show brush preview
+            let preview: int = (paint_r * 65536) + (paint_g * 256) + paint_b
+            Blow.Circle(canvas_x, canvas_y, brush, preview)
+
+            Blow.Muted(32, 520, "Hold LMB inside the dark area to paint. Brush size & RGB on the right.", 1)
+
+            // side controls
+            Blow.Panel(728, 120, 220, 420, 16)
+            Blow.Label(744, 140, "Brush", 2)
+            Blow.Divider(744, 172, 188)
+
+            Blow.Label(744, 196, "Size", 1)
+            Blow.LabelInt(880, 196, brush, 1)
+            brush = Blow.Slider(4, 744, 224, 180, brush, 40)
+            if brush < 2 { brush = 2 }
+
+            Blow.Label(744, 270, "R", 1)
+            Blow.LabelInt(880, 270, paint_r, 1)
+            paint_r = Blow.Slider(5, 744, 296, 180, paint_r, 255)
+
+            Blow.Label(744, 340, "G", 1)
+            Blow.LabelInt(880, 340, paint_g, 1)
+            paint_g = Blow.Slider(6, 744, 366, 180, paint_g, 255)
+
+            Blow.Label(744, 410, "B", 1)
+            Blow.LabelInt(880, 410, paint_b, 1)
+            paint_b = Blow.Slider(7, 744, 436, 180, paint_b, 255)
+
+            Blow.Muted(744, 480, "dots painted", 1)
+            Blow.LabelInt(744, 504, dots, 2)
+        }
+
+        // ========== VIEW 3: ABOUT ==========
+        if view == 3 {
+            Blow.Panel(12, 120, 936, 420, 16)
+            Blow.Label(40, 150, "About this demo", 3)
+            Blow.Divider(40, 196, 880)
+
+            Blow.Label(40, 230, "BlowUI is Purplecode's immediate-mode UI toolkit.", 2)
+            Blow.Muted(40, 270, "Software framebuffer presented via native Wayland (xdg-shell preferred) or X11.", 1)
+            Blow.Muted(40, 294, "Fonts: FantasqueSansM Nerd Font Propo when available, else Builtin Emergency Font.", 1)
+            Blow.Muted(40, 318, "Deep embedding: Blow.IFont / compile-time PURPLE_EMBEDDED_FONT_* bytes.", 1)
+
+            Blow.Label(40, 370, "Keyboard", 2)
+            Blow.Muted(40, 404, "1–4 switch views   T cycle theme   Esc quit", 1)
+            Blow.Muted(40, 428, "TextBox: type while focused, Enter commits (adds +10 clicks on Dashboard).", 1)
+
+            Blow.Label(40, 470, "This build exercises", 2)
+            Blow.Badge(40, 504, "Panel", 0xA78BFA)
+            Blow.Badge(120, 504, "Button", 0x60A5FA)
+            Blow.Badge(210, 504, "Toggle", 0x34D399)
+            Blow.Badge(300, 504, "Checkbox", 0xFBBF24)
+            Blow.Badge(420, 504, "Slider", 0xF472B6)
+            Blow.Badge(510, 504, "Progress", 0xFB7185)
+            Blow.Badge(620, 504, "TextBox", 0x38BDF8)
+            Blow.Badge(720, 504, "Badge", 0xC084FC)
+            Blow.Badge(810, 504, "Draw", 0x4ADE80)
+        }
+
+        Blow.End()
+    }
+
+    return 0
+}
