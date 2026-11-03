@@ -1,0 +1,33 @@
+// BlowUI font demo — Arial (or Liberation Sans / DejaVu fallback on Linux)
+// Requires FreeType + a matching system face.
+fn main() {
+    Blow.Window(780, 460, "BlowUI — Arial")
+    let fid: int = Blow.Font("Arial")
+    let running: int = 1
+    while running == 1 {
+        if Blow.Poll() == -1 { running = 0 }
+        Blow.Begin(0)
+        Blow.Panel(20, 20, 740, 420, 16)
+        Blow.Label(40, 40, "Arial", 3)
+        if fid < 0 {
+            Blow.Muted(40, 90, "Arial not found — using Builtin Emergency Font.", 1)
+            Blow.Muted(40, 110, "Linux often resolves Liberation Sans or DejaVu as substitutes.", 1)
+        }
+        if fid >= 0 {
+            Blow.Muted(40, 90, "Scalable face loaded (Arial / Liberation / DejaVu path search).", 1)
+        }
+        Blow.Divider(40, 140, 700)
+        Blow.Label(40, 170, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 2)
+        Blow.Label(40, 210, "abcdefghijklmnopqrstuvwxyz", 2)
+        Blow.Label(40, 250, "0123456789  punctuation: .,;:!?", 2)
+        Blow.Label(40, 300, "The quick brown fox jumps over the lazy dog.", 2)
+        Blow.Label(40, 350, "Pack my box with five dozen liquor jugs.", 2)
+        Blow.Muted(40, 400, "Window", 1)
+        Blow.LabelInt(120, 400, Blow.Width(), 1)
+        Blow.Muted(200, 400, "x", 1)
+        Blow.LabelInt(230, 400, Blow.Height(), 1)
+        if Blow.Button(580, 380, 140, 40, "Quit") == 1 { running = 0 }
+        Blow.End()
+    }
+    return 0
+}

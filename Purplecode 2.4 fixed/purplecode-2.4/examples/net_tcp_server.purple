@@ -1,0 +1,12 @@
+fn main() {
+    let buf: int = System.Memory.Alloc(600)
+    let ls: int = Net.Listen(18080)
+    let c: int = Net.Accept(ls)
+    let n: int = Net.Recv(c, buf, 500)
+    Net.Print(buf)
+    Data.ShellPrint("<- server got")
+    Net.Send(c, "pong from purplecode")
+    Net.Close(c)
+    Net.Close(ls)
+    return 0
+}

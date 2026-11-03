@@ -1,0 +1,22 @@
+fn main() {
+    let count: int = 0;
+    let limit: int = 5;
+    let label: string = "counted";
+    let done: bool = false;
+
+    while count < limit {
+        count = count + 1;
+    }
+
+    if count == limit {
+        done = true;
+    }
+
+    if done {
+        Data.ShellPrint.Int(count);
+    } else {
+        Data.ShellPrint("not done");
+    }
+
+    return count;
+}

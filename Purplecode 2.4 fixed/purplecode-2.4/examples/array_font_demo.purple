@@ -1,0 +1,33 @@
+// Milestone 1 1.6 demo: Arrays + GUI font text
+fn main() {
+    // Create a dynamic array of 5 integers
+    let nums = Array.New(5);
+    Array.Set(nums, 0, 10);
+    Array.Set(nums, 1, 20);
+    Array.Set(nums, 2, 30);
+    Array.Set(nums, 3, 40);
+    Array.Set(nums, 4, 50);
+
+    Data.ShellPrint("Array length:");
+    Data.ShellPrint.Int(Array.Len(nums));
+    Data.ShellPrint("First element:");
+    Data.ShellPrint.Int(Array.Get(nums, 0));
+
+    // GUI window with text
+    GUI.Window.CreateSized(640, 400, "Purplecode 1.6 Arrays + Font");
+    GUI.Clear();
+    GUI.DrawText(20, 20, "Hello from Purplecode Milestone 1 1.6!", 0x00FF88);
+    GUI.DrawText(20, 40, "Arrays and bitmap font text are working.", 0xFFFFFF);
+    GUI.DrawText(20, 70, "Array[0] = 10  Array[4] = 50", 0x88AAFF);
+    GUI.Present();
+
+    // simple event loop so the window stays open a bit
+    let i = 0;
+    while i < 200 {
+        GUI.Pump(16);
+        i = i + 1;
+    }
+
+    Array.Free(nums);
+    return 0;
+}

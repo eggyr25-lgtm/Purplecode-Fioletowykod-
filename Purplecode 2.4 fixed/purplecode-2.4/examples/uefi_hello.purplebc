@@ -1,0 +1,7 @@
+// Minimal UEFI application. It uses firmware console services, not VGA memory.
+fn main() {
+    Screen.Clear()
+    Screen.Write("Hello from Purplebootcode UEFI!\n")
+    Screen.Write("This is a PE/COFF EFI application.\n")
+    return 0
+}

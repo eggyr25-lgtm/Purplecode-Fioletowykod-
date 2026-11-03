@@ -1,0 +1,6 @@
+// Purplecode Hello World
+fn main() {
+    Data.ShellPrint("Hell yeah! Purplecode 2.4 is alive.")
+    Data.ShellPrint("This was compiled by Purplecode to a native executable.")
+    return 0
+}

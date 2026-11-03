@@ -1,0 +1,15 @@
+// Purplecode 0.9: hierarchical boot-safe API example for Multiboot2.
+// Requires a boot environment with a primary-master ATA/ATAPI device for FS.*.
+fn main() {
+    GUI.Text("Purplecode 0.9 boot API\n")
+    GUI.Clear()
+    let iso_size: int = FS.FileSize("/BOOT/CONFIG.TXT")
+    let read_status: int = Kernel.Call(10, 0xB8000, 0)
+    if iso_size < 0 {
+        GUI.Text("ISO file not found or optical drive unavailable\n")
+    }
+    if read_status < 0 {
+        GUI.Text("Kernel.Call service failed\n")
+    }
+    return 0
+}
