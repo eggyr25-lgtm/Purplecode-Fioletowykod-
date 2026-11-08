@@ -50,7 +50,7 @@ purplec: $(COMPILER_SRCS) $(COMPILER_HEADERS)
 	$(CC) $(CFLAGS) -o $@ $(COMPILER_SRCS) $(LDFLAGS)
 	@echo ""
 	@echo "Built Purplecode 2.4 compiler: ./purplec"
-	@echo "  Hosted path (Linux). Use --direct for pure ELF64, no C runtime."
+	@echo "  Always Native, The slogan is Natively compiled, Natively fast."
 	@echo ""
 
 bootcode: purplebc
